@@ -2,7 +2,9 @@ import json
 import re
 import logging
 import time
+import datetime
 from typing import Optional, Literal, Callable, TypeVar, Any, List, Tuple
+from datetime import datetime, timedelta
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
@@ -133,7 +135,9 @@ def intro(state: AgentState) -> AgentState:
 
     if next_node == "router" and not failed_parsing:
         # Attempt to transfer to live contact
-        transfer_success = attempt_transfer()  # TODO: implement function
+        transfer_success = attempt_transfer()
+        # update time of transfer attempt
+        state.conversation_state.time_of_transfer_attempt = datetime.now()
         if transfer_success:
             # end conversation
             state.next_node = None
@@ -206,8 +210,7 @@ def router(state: AgentState) -> AgentState:
     
     # Set the next node based on the category
     if category == "callback":
-        state.next_node = "info_collector"
-        state.conversation_state.wants_callback = True
+        state.next_node = "reattempt_live_contact"
     elif category == "tour":
         state.next_node = "tour_scheduler"
     elif category == "floorplan":
@@ -227,16 +230,30 @@ def reattempt_live_contact(state: AgentState) -> AgentState:
     # Set callback flag
     state.conversation_state.wants_callback = True
     
-    # Check if enough time has passed since last attempt
-    if not hasattr(state.conversation_state, 'time_of_transfer_attempt'):
-        state.conversation_state.time_of_transfer_attempt = CURRENT_DATETIME
+    TWO_MINUTES = 120
+    now = datetime.now()
+    last_attempt = state.conversation_state.time_of_transfer_attempt
+    if last_attempt is None:
+        last_attempt = now - timedelta(seconds=TWO_MINUTES+1)  # force as if enough time has passed
+    time_since_last_attempt = now - last_attempt
     
-    time_since_last_attempt = CURRENT_DATETIME - state.conversation_state.time_of_transfer_attempt
+    # Early exit to info_collector if not enough time has passed
+    if time_since_last_attempt.total_seconds() <= TWO_MINUTES:
+        state.next_node = "info_collector"
+        return state
     
-    if time_since_last_attempt.total_seconds() > 120:  # 2 minutes
-        # Simulate transfer attempt
-        state.messages.append(AIMessage(content="[10 second pause]"))
-        state.conversation_state.time_of_transfer_attempt = CURRENT_DATETIME
+    # Else, attempt to transfer to live contact
+    transfer_success = attempt_transfer()
+    state.conversation_state.time_of_transfer_attempt = now
+
+    if transfer_success:
+        # end conversation
+        state.next_node = None
+        return state
+    else:
+        transfer_failure_message = "Our sales director is not currently available, but I can take a message and have them call you back."
+        print(f"Sophie: {transfer_failure_message}")
+        state.messages += [AIMessage(content=transfer_failure_message)]
     
     # Proceed to info collector
     state.next_node = "info_collector"
@@ -349,8 +366,7 @@ def tour_scheduler(state: AgentState) -> AgentState:
     
     # Check if we've exceeded the maximum attempts
     if state.conversation_state.tour_scheduling_attempts >= 3:
-        state.next_node = "info_collector"
-        state.conversation_state.wants_callback = True
+        state.next_node = "reattempt_live_contact"
         return state
     
     tour_scheduler_prompt = """

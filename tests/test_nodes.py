@@ -182,15 +182,17 @@ def test_reattempt_live_contact_first_attempt(base_state):
     """Test reattempt_live_contact on first attempt."""
     # Setup
     base_state.messages = [HumanMessage(content="I want to talk to a real person!")]
+    base_state.conversation_state.time_of_transfer_attempt = datetime.now() - timedelta(minutes=3)
     
     # Execute
-    result = reattempt_live_contact(base_state)
+    with patch('nodes.attempt_transfer', return_value=False):
+        result = reattempt_live_contact(base_state)
     
     # Verify
     assert result.next_node == "info_collector"
     assert result.conversation_state.wants_callback == True
-    assert len(result.messages) == 2  # Original message + pause message
-    assert "[10 second pause]" in result.messages[1].content
+    assert len(result.messages) == 2  # Original message + failure message
+    assert "sales director is not currently available" in result.messages[1].content
 
 @pytest.mark.reattempt_live_contact
 def test_reattempt_live_contact_quick_retry(base_state):
@@ -204,7 +206,42 @@ def test_reattempt_live_contact_quick_retry(base_state):
     
     # Verify
     assert result.next_node == "info_collector"
-    assert len(result.messages) == 1  # No pause message added
+    assert len(result.messages) == 1  # No additional messages added
+    assert result.conversation_state.wants_callback == True
+
+@pytest.mark.reattempt_live_contact
+def test_reattempt_live_contact_successful_transfer(base_state):
+    """Test reattempt_live_contact with successful transfer."""
+    # Setup
+    base_state.messages = [HumanMessage(content="I want to talk to a real person!")]
+    base_state.conversation_state.time_of_transfer_attempt = datetime.now() - timedelta(minutes=3)
+    
+    # Execute
+    with patch('nodes.attempt_transfer', return_value=True):
+        result = reattempt_live_contact(base_state)
+    
+    # Verify
+    assert result.next_node is None  # Conversation ends
+    assert len(result.messages) == 1  # No additional messages added
+    assert result.conversation_state.wants_callback == True
+
+@pytest.mark.reattempt_live_contact
+def test_reattempt_live_contact_no_previous_attempt(base_state):
+    """Test reattempt_live_contact when no previous attempt exists."""
+    # Setup
+    base_state.messages = [HumanMessage(content="I want to talk to a real person!")]
+    base_state.conversation_state.time_of_transfer_attempt = None
+    
+    # Execute
+    with patch('nodes.attempt_transfer', return_value=False):
+        result = reattempt_live_contact(base_state)
+    
+    # Verify
+    assert result.next_node == "info_collector"
+    assert result.conversation_state.time_of_transfer_attempt is not None
+    assert result.conversation_state.wants_callback == True
+    assert len(result.messages) == 2  # Original message + failure message
+    assert "sales director is not currently available" in result.messages[1].content
 
 # Info_collector Node Tests
 @pytest.mark.info_collector
