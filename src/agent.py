@@ -1,153 +1,36 @@
 from typing import Optional, Tuple
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
 from state import AgentState
 from nodes import (
-    greeting,
+    intro,
     router,
+    reattempt_live_contact,
     tour_scheduler,
-    pricing_handler,
-    amenities_handler,
-    payment_options_handler,
-    contact_collector,
-    frustration_handler,
-    general_handler,
-    validation_layer,
-    determine_next_step
+    knowledge_base
 )
 
-def create_agent_workflow():
-    """Creates and configures the LangGraph workflow."""
-    
-    # Create a new graph
-    workflow = StateGraph(AgentState)
-    
-    # Add all the nodes
-    workflow.add_node("greeting", greeting)
-    workflow.add_node("router", router)
-    workflow.add_node("tour_scheduler", tour_scheduler)
-    workflow.add_node("pricing_handler", pricing_handler)
-    workflow.add_node("amenities_handler", amenities_handler)
-    workflow.add_node("payment_options_handler", payment_options_handler)
-    workflow.add_node("contact_collector", contact_collector)
-    workflow.add_node("frustration_handler", frustration_handler)
-    workflow.add_node("general_handler", general_handler)
-    workflow.add_node("validation", validation_layer)
-    
-    # Set the entry point
-    workflow.set_entry_point("greeting")
-    
-    # Connect nodes with conditional logic
-    workflow.add_conditional_edges(
-        "greeting",
-        determine_next_step,
-        {
-            "router": "router",
-            "tour_scheduler": "tour_scheduler",
-            "pricing_handler": "pricing_handler",
-            "amenities_handler": "amenities_handler",
-            "payment_options_handler": "payment_options_handler",
-            "general_handler": "general_handler"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "router",
-        determine_next_step,
-        {
-            "tour_scheduler": "tour_scheduler",
-            "pricing_handler": "pricing_handler",
-            "amenities_handler": "amenities_handler",
-            "payment_options_handler": "payment_options_handler",
-            "contact_collector": "contact_collector",
-            "frustration_handler": "frustration_handler",
-            "general_handler": "general_handler"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "tour_scheduler",
-        determine_next_step,
-        {
-            "tour_scheduler": "tour_scheduler",
-            "general_handler": "general_handler",
-            "router": "router"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "pricing_handler",
-        determine_next_step,
-        {
-            "tour_scheduler": "tour_scheduler",
-            "payment_options_handler": "payment_options_handler",
-            "router": "router"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "amenities_handler",
-        determine_next_step,
-        {
-            "contact_collector": "contact_collector",
-            "tour_scheduler": "tour_scheduler",
-            "router": "router"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "payment_options_handler",
-        determine_next_step,
-        {
-            "contact_collector": "contact_collector",
-            "router": "router"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "contact_collector",
-        determine_next_step,
-        {
-            "contact_collector": "contact_collector",
-            "general_handler": "general_handler"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "frustration_handler",
-        determine_next_step,
-        {
-            "contact_collector": "contact_collector",
-            "router": "router"
-        }
-    )
-    
-    workflow.add_conditional_edges(
-        "general_handler",
-        determine_next_step,
-        {
-            "contact_collector": "contact_collector",
-            "router": "router"
-        }
-    )
-    
-    # All paths go through validation before returning to the user
-    workflow.add_edge("tour_scheduler", "validation")
-    workflow.add_edge("pricing_handler", "validation")
-    workflow.add_edge("amenities_handler", "validation")
-    workflow.add_edge("payment_options_handler", "validation")
-    workflow.add_edge("contact_collector", "validation")
-    workflow.add_edge("frustration_handler", "validation")
-    workflow.add_edge("general_handler", "validation")
-    
-    # Add terminal states - after validation, we're done for this turn
-    workflow.add_edge("validation", END)
-    
-    return workflow
+SYSTEM_PROMPT = """
+You are Sophie, a virtual sales specialist at ACME Senior Living. 
 
-# Create the compiled agent
-agent_executor = create_agent_workflow().compile()
+For the user's first question:
+1. Greet them warmly with: "Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?"
+2. After they ask a question, paraphrase it briefly and say: "Got it! I can definitely help with that. Let me check if my director of sales is available for a conversation. Please hold."
+3. Then say: "Our sales director is not currently available, but I am a virtual assistant, and I am able to answer basic questions about our community. Would you like to speak with me, or leave a message for Jami."
+4. Add: "Before I answer, just so you know—This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
+5. Finally, answer their question starting with "About your query on [topic]..." and be helpful and friendly.
+
+Be conversational, concise, and human-like. Use everyday language and don't be robotic.
+"""
+
+NODE_MAP = {
+    "intro": intro,
+    "router": router,
+    "reattempt_live_contact": reattempt_live_contact,
+    "tour_scheduler": tour_scheduler,
+    "knowledge_base": knowledge_base
+}
 
 def run_agent(user_message: str, state: Optional[AgentState] = None) -> Tuple[str, AgentState]:
     """
@@ -164,12 +47,14 @@ def run_agent(user_message: str, state: Optional[AgentState] = None) -> Tuple[st
     if state is None:
         # Initialize a new state
         state = AgentState()
+        state.next_node = "intro"
+        state.messages.append(SystemMessage(content=SYSTEM_PROMPT))
     
     # Add the user message to the state
     state.messages.append(HumanMessage(content=user_message))
-    
+
     # Run the agent
-    new_state = agent_executor.invoke(state)
+    new_state = NODE_MAP[state.next_node](state)
     
     # Get the last AI message
     ai_messages = [msg for msg in new_state.messages if isinstance(msg, AIMessage)]

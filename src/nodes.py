@@ -33,23 +33,21 @@ def intro(state: AgentState) -> AgentState:
     Be conversational, concise, and human-like. Use everyday language and don't be robotic.
     """
     
-    messages = state.messages
-    
     # If this is the very first interaction
-    if len(messages) == 1 and isinstance(messages[0], HumanMessage):
-        # Create the prompt template
+    if len(state.messages) == 1 and isinstance(state.messages[0], HumanMessage):
+        # Create the prompt template with system message first
         prompt = ChatPromptTemplate.from_messages([
             ("system", intro_system_prompt),
-            MessagesPlaceholder(variable_name="messages"),
+            ("human", state.messages[0].content)
         ])
         
         # Get response from LLM
         response = llm.invoke(
-            prompt.invoke({"messages": messages}).to_messages()
+            prompt.to_messages()
         )
         
         # Update state
-        state.messages.append(AIMessage(content=response.content))
+        state.messages = [AIMessage(content=response.content)]
         state.conversation_state.intro_completed = True
         
         # Check for specific inquiry types
@@ -66,7 +64,7 @@ def intro(state: AgentState) -> AgentState:
         """
         
         inquiry_type = llm.invoke(
-            inquiry_check_prompt.format(user_message=messages[0].content)
+            inquiry_check_prompt.format(user_message=state.messages[0].content)
         ).content.strip().lower()
         
         # Set the next node based on inquiry type
