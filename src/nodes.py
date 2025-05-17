@@ -158,9 +158,9 @@ def router(state: AgentState) -> AgentState:
         - tour: Tour request
         - floorplan: Floorplan request
         - frustration: Frustration with AI
-        - knowledge-based inquiry: a general question about the community
+        - knowledge: a general question about the community
             - pricing: cost of care
-            - amenities: what activities/services are available
+            - amenities: what activities/services are available (including questions about community details, features, or what the community offers)
             - financing: financing options (Medicaid, VA, etc.)
             - phone: asking for the community phone number
             - employment: Employment inquiry
@@ -172,7 +172,7 @@ def router(state: AgentState) -> AgentState:
     # Create output parser
     parser = StructuredOutputParser.from_response_schemas([
         ResponseSchema(name="category", description="The category of the user's request (must be either callback, tour, floorplan, frustration, or knowledge)"),
-        ResponseSchema(name="inquiry_type", description="The type of inquiry for knowledge-based category (must be either pricing, amenities, financing, phone, employment, or uncategorized)")
+        ResponseSchema(name="inquiry_type", description="The type of inquiry for knowledge category (must be either pricing, amenities, financing, phone, employment, or uncategorized)")
     ])
     
     # Get the last message and validate it
@@ -190,8 +190,12 @@ def router(state: AgentState) -> AgentState:
     parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=new_message)], parser)
     
     # Extract the classification
-    category = parsed_response.get("category", "knowledge-based")
+    category = parsed_response.get("category", "knowledge")
     inquiry_type = parsed_response.get("inquiry_type", "uncategorized")
+    
+    # Post-process inquiry type for community details
+    if inquiry_type == "uncategorized" and any(term in last_message.content.lower() for term in ["community details", "community features", "what does the community offer", "what's in the community"]):
+        inquiry_type = "amenities"
     
     # If this is the first message after intro, add disclosure
     if not state.conversation_state.disclosure_given:
@@ -211,7 +215,7 @@ def router(state: AgentState) -> AgentState:
         state.conversation_state.wants_brochure = True
     elif category == "frustration":
         state.next_node = "reattempt_live_contact"
-    else:  # knowledge-based inquiry
+    else:  # knowledge category
         state.next_node = "knowledge_base"
         state.conversation_state.inquiry_type = inquiry_type
     

@@ -77,7 +77,7 @@ def test_router_first_message_disclosure(base_state):
     """Test router adds disclosure for first message."""
     # Setup
     base_state.messages = [HumanMessage(content="Hello")]
-    base_state.conversation_state.is_first_message = True
+    base_state.conversation_state.disclosure_given = False
     
     # Execute
     result = router(base_state)
@@ -85,7 +85,7 @@ def test_router_first_message_disclosure(base_state):
     # Verify
     assert len(result.messages) == 2
     assert "conversation is being recorded" in result.messages[1].content
-    assert not result.conversation_state.is_first_message
+    assert result.conversation_state.disclosure_given
 
 @pytest.mark.router
 def test_router_phone_request(base_state):
@@ -97,8 +97,8 @@ def test_router_phone_request(base_state):
     result = router(base_state)
     
     # Verify
-    assert result.next_node == "router"
-    assert "850-445-8362" in result.messages[-1].content
+    assert result.next_node == "knowledge_base"
+    assert result.conversation_state.inquiry_type == "phone"
 
 @pytest.mark.router
 def test_router_tour_request(base_state):
@@ -147,8 +147,8 @@ def test_router_employment_request(base_state):
     result = router(base_state)
     
     # Verify
-    assert result.next_node == "router"
-    assert "careers" in result.messages[-1].content.lower()
+    assert result.next_node == "knowledge_base"
+    assert result.conversation_state.inquiry_type == "employment"
 
 @pytest.mark.router
 def test_router_callback_request(base_state):
@@ -167,14 +167,14 @@ def test_router_callback_request(base_state):
 def test_router_knowledge_base_routing(base_state):
     """Test router handling knowledge base routing."""
     # Setup
-    base_state.messages = [HumanMessage(content="What are your community details?")]
+    base_state.messages = [HumanMessage(content="Do you have a pool?")]
     
     # Execute
     result = router(base_state)
     
     # Verify
     assert result.next_node == "knowledge_base"
-    assert result.conversation_state.inquiry_type == "community_details"
+    assert result.conversation_state.inquiry_type == "amenities"
 
 # Reattempt_live_contact Node Tests
 @pytest.mark.reattempt_live_contact

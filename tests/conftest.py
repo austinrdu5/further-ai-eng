@@ -15,6 +15,11 @@ from state import AgentState, ConversationState, UserInfo
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "intro: mark test as an intro node test")
+    config.addinivalue_line("markers", "router: mark test as a router node test")
+    config.addinivalue_line("markers", "reattempt_live_contact: mark test as a reattempt_live_contact node test")
+    config.addinivalue_line("markers", "info_collector: mark test as an info_collector node test")
+    config.addinivalue_line("markers", "tour_scheduler: mark test as a tour_scheduler node test")
+    config.addinivalue_line("markers", "knowledge_base: mark test as a knowledge_base node test")
 
 @pytest.fixture
 def base_state():
