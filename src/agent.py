@@ -87,5 +87,5 @@ if __name__ == "__main__":
         print(f"User: {user_input}")
         response, conversation_state = run_agent(user_input, conversation_state)
         print(f"Sophie: {response}")
-        print(f"Current State: {conversation_state.json(indent=2)}")
+        print(f"Current State: {conversation_state.model_dump_json(indent=2)}")
         print("-" * 50)

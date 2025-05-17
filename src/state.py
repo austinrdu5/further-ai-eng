@@ -14,7 +14,7 @@ class UserInfo(BaseModel):
     extra_information: Dict[str, str] = Field(default_factory=dict)  # For any additional user preferences/requirements
 
 class ConversationState(BaseModel):
-    is_first_message: bool = True
+    disclosure_given: bool = False
     frustration_detected: bool = False
     time_of_transfer_attempt: Optional[str] = None
     wants_brochure: bool = False

@@ -12,7 +12,6 @@
         - if user wants callback, next node is `reattempt_live_contact` with state.conversation_state.wants_callback = True
         - if user is asking for community phone number or an existing vendor or resident, provide the community phone number and ask if they have other questions (next node is `router`)
         - if user is asking about employment, direct to careers page and ask for other questions (next node is `router`)
-        - if user wants callback, next node is `info_collector` with state.conversation_state.wants_callback = True
         - if query is about touring, next node is `tour_scheduler`
         - if query is about floorplan, next node is `info_collector` with state.conversation_state.wants_brochure = True
         - if query is about frustration with AI

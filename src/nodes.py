@@ -65,31 +65,11 @@ def structured_invoke(llm: ChatOpenAI,
         "failed_parsing": True
     }
 
-def update_state(parsed_response: dict, state: AgentState) -> Tuple[str, str, bool]:
-    # Whether success or fail, parsed_response is a dictionary with keys "response" and "next_node"
-    response = parsed_response["response"]
-    next_node = parsed_response["next_node"]
-    failed_parsing = parsed_response.get("failed_parsing", False)
-
-    # Update state with the response
-    state.messages += [AIMessage(content=response)]
-    state.next_node = next_node
-    if failed_parsing:
-        state.failed_parsing = True
-        state.n_parsing_fails += 1
-
-    # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
-    if state.n_parsing_fails >= 3:
-        print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
-        state.next_node = None
-
-    return response, next_node, failed_parsing
-
 def intro(state: AgentState) -> AgentState:
     """First interaction with the user."""
 
     # Define the system prompt for the initial greeting and routing
-    intro_template = """
+    intro_prompt = """
     Last user message: {user_message}
     
     Instructions:
@@ -116,26 +96,49 @@ def intro(state: AgentState) -> AgentState:
         ResponseSchema(name="response", description="The full response message to the user"),
         ResponseSchema(name="next_node", description="The next node to route to (must be either 'intro' or 'router')")
     ])
+
+    last_message = state.messages[-1]
+    if not isinstance(last_message, HumanMessage):
+        raise ValueError("Last message should be a HumanMessage")
     
-    # Get the last message and format the prompt
-    last_message = state.messages[-1].content if state.messages else ""
-    new_message = intro_template.format(
-        user_message=last_message,
+    # Augment last message 
+    new_message = intro_prompt.format(
+        user_message=last_message.content,
         format_instructions=parser.get_format_instructions()
     )
     
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, [('user', new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=new_message)], parser)
+
+    # Whether success or fail, parsed_response is a dictionary with keys "response" and "next_node"
+    response = parsed_response["response"]
+    next_node = parsed_response["next_node"]
+    failed_parsing = parsed_response.get("failed_parsing", False)
 
     # Update state with the response
-    response, next_node, failed_parsing = update_state(parsed_response, state)
+    state.messages += [AIMessage(content=response)]
+    state.next_node = next_node
+    if failed_parsing:
+        state.failed_parsing = True
+        state.n_parsing_fails += 1
 
-    print(f"Sophie: {response}")
+    # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
+    if state.n_parsing_fails >= 3:
+        print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
+        state.next_node = None
+        return state
+
+    # If not failed, execute node's logic
+    print(f"Sophie: {response}")            
 
     if next_node == "router" and not failed_parsing:
         # Attempt to transfer to live contact
-        transfer_success = attempt_transfer()
-        if not transfer_success:
+        transfer_success = attempt_transfer()  # TODO: implement function
+        if transfer_success:
+            # end conversation
+            state.next_node = None
+            return state
+        else:
             transfer_failure_message = "Our sales director is not currently available, but I am a virtual assistant, and I am able to answer basic questions about our community. Would you like to speak with me, or leave a message for Jami?"
             print(f"Sophie: {transfer_failure_message}")
             state.messages += [AIMessage(content=transfer_failure_message)]
@@ -145,54 +148,60 @@ def intro(state: AgentState) -> AgentState:
 def router(state: AgentState) -> AgentState:
     """Routes the conversation to the appropriate handler based on the latest message."""
     
-    # Get the latest message from the user
-    if not state.messages or len(state.messages) < 2:
-        # Default to router if there's not enough context
-        state.next_node = "knowledge_base"
-        return state
+    # Define the system prompt for routing
+    routing_prompt = """
+    Last user message: {user_message}
     
-    # Get the last user message
-    last_messages = [msg for msg in state.messages if isinstance(msg, HumanMessage)]
-    if not last_messages:
-        state.next_node = "knowledge_base"
-        return state
+    Instructions:
+    Using the message history and the above message, categorize the user's intent into one of these categories:
+        - callback: Callback request or leaving a message
+        - tour: Tour request
+        - floorplan: Floorplan request
+        - frustration: Frustration with AI
+        - knowledge-based inquiry: a general question about the community
+            - pricing: cost of care
+            - amenities: what activities/services are available
+            - financing: financing options (Medicaid, VA, etc.)
+            - phone: asking for the community phone number
+            - employment: Employment inquiry
+            - uncategorized: For all other cases
+
+    {format_instructions}
+    """
+
+    # Create output parser
+    parser = StructuredOutputParser.from_response_schemas([
+        ResponseSchema(name="category", description="The category of the user's request (must be either callback, tour, floorplan, frustration, or knowledge)"),
+        ResponseSchema(name="inquiry_type", description="The type of inquiry for knowledge-based category (must be either pricing, amenities, financing, phone, employment, or uncategorized)")
+    ])
     
-    last_user_message = last_messages[-1].content
+    # Get the last message and validate it
+    last_message = state.messages[-1]
+    if not isinstance(last_message, HumanMessage):
+        raise ValueError("Last message should be a HumanMessage")
+    
+    # Format the prompt with the last message
+    new_message = routing_prompt.format(
+        user_message=last_message.content,
+        format_instructions=parser.get_format_instructions()
+    )
+    
+    # Get structured response with retries
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=new_message)], parser)
+    
+    # Extract the classification
+    category = parsed_response.get("category", "knowledge-based")
+    inquiry_type = parsed_response.get("inquiry_type", "uncategorized")
     
     # If this is the first message after intro, add disclosure
-    if state.conversation_state.is_first_message:
+    if not state.conversation_state.disclosure_given:
         disclosure = "Before I answer, just so you know—This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
+        print(f"Sophie: {disclosure}")
         state.messages.append(AIMessage(content=disclosure))
-        state.conversation_state.is_first_message = False
-    
-    # Create a routing prompt to determine the topic
-    routing_prompt = """
-    Based on the user's message: "{user_message}"
-    
-    Determine which category this request falls into:
-    
-    1. Community phone number or existing vendor/resident inquiry
-    2. Employment inquiry
-    3. Callback request
-    4. Tour request
-    5. Floorplan request
-    6. Frustration with AI
-    7. Other inquiry (pricing, community details, financing, or uncategorized)
-    
-    Respond with ONLY one of: "phone", "employment", "callback", "tour", "floorplan", "frustration", or "other"
-    """
-    
-    # Get the routing decision
-    category = llm.invoke(
-        routing_prompt.format(user_message=last_user_message)
-    ).content.strip().lower()
+        state.conversation_state.disclosure_given = True
     
     # Set the next node based on the category
-    if category == "phone":
-        state.next_node = "router"  # Stay in router to handle phone number request
-    elif category == "employment":
-        state.next_node = "router"  # Stay in router to handle employment request
-    elif category == "callback":
+    if category == "callback":
         state.next_node = "info_collector"
         state.conversation_state.wants_callback = True
     elif category == "tour":
@@ -202,17 +211,9 @@ def router(state: AgentState) -> AgentState:
         state.conversation_state.wants_brochure = True
     elif category == "frustration":
         state.next_node = "reattempt_live_contact"
-    else:
+    else:  # knowledge-based inquiry
         state.next_node = "knowledge_base"
-        # Set inquiry type for knowledge base
-        if "pricing" in last_user_message.lower():
-            state.conversation_state.inquiry_type = "pricing"
-        elif "community" in last_user_message.lower():
-            state.conversation_state.inquiry_type = "community_details"
-        elif "financing" in last_user_message.lower():
-            state.conversation_state.inquiry_type = "financing"
-        else:
-            state.conversation_state.inquiry_type = "uncategorized"
+        state.conversation_state.inquiry_type = inquiry_type
     
     return state
 
