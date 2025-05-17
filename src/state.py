@@ -32,4 +32,7 @@ class AgentState(BaseModel):
     user_info: UserInfo = Field(default_factory=UserInfo)
     conversation_state: ConversationState = Field(default_factory=ConversationState)
     messages: List[Union[HumanMessage, AIMessage]] = Field(default_factory=list)
+    failed_parsing: bool = False
+    n_parsing_fails: int = 0
     next_node: Optional[str] = None  # Used to control flow in the graph
+

@@ -1,8 +1,9 @@
 import json
 import re
 import logging
+import time
 from typing import Optional, Literal, Callable, TypeVar, Any, List, Tuple
-from functools import wraps
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
@@ -26,6 +27,12 @@ logger.addHandler(console_handler)
 
 # LLM setup
 llm = ChatOpenAI(temperature=0.1, model="gpt-4")  # Lower temperature for more structured outputs
+
+def attempt_transfer():
+    # TODO: implement function 
+    print("[10 second pause, attempt transfer to live contact...]")
+    time.sleep(3)
+    return False
 
 def structured_invoke(llm: ChatOpenAI, 
                      messages: List[Tuple[str, str]],
@@ -53,30 +60,40 @@ def structured_invoke(llm: ChatOpenAI,
 
     logger.error("All retry attempts failed")
     return {
-        "response": "I apologize, but I'm having trouble processing your request. Let me connect you with someone who can help.",
-        "next_node": "reattempt_live_contact"
+        "response": "I apologize, but I'm having trouble processing your request. Let me try again.",
+        "next_node": "router",
+        "failed_parsing": True
     }
+
+def update_state(parsed_response: dict, state: AgentState) -> Tuple[str, str, bool]:
+    # Whether success or fail, parsed_response is a dictionary with keys "response" and "next_node"
+    response = parsed_response["response"]
+    next_node = parsed_response["next_node"]
+    failed_parsing = parsed_response.get("failed_parsing", False)
+
+    # Update state with the response
+    state.messages += [AIMessage(content=response)]
+    state.next_node = next_node
+    if failed_parsing:
+        state.failed_parsing = True
+        state.n_parsing_fails += 1
+
+    # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
+    if state.n_parsing_fails >= 3:
+        print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
+        state.next_node = None
+
+    return response, next_node, failed_parsing
 
 def intro(state: AgentState) -> AgentState:
     """First interaction with the user."""
-    
-    # If intro is already completed, just pass through
-    if state.conversation_state.intro_completed:
-        state.next_node = "router"
-        return state
-    
-    # Create output parser
-    parser = StructuredOutputParser.from_response_schemas([
-        ResponseSchema(name="response", description="The full response message to the user"),
-        ResponseSchema(name="next_node", description="The next node to route to (must be either 'intro' or 'router')")
-    ])
-    
+
     # Define the system prompt for the initial greeting and routing
     intro_template = """
     Last user message: {user_message}
     
     Instructions:
-    1. Rephrase the user's query to confirm understanding: Got it! I can definitely help with that.
+    1. Rephrase the user's last query to confirm understanding: Got it! I can definitely help with that.
     2. Analyze the user's question for the following cases:
         - If asking for community phone number or about existing vendor/resident:
             - Provide number: (850)-445-8362
@@ -93,28 +110,36 @@ def intro(state: AgentState) -> AgentState:
     
     {format_instructions}
     """
+
+    # Create output parser
+    parser = StructuredOutputParser.from_response_schemas([
+        ResponseSchema(name="response", description="The full response message to the user"),
+        ResponseSchema(name="next_node", description="The next node to route to (must be either 'intro' or 'router')")
+    ])
     
-    old_messages = state.messages[:-1].to_messages()
+    # Get the last message and format the prompt
+    last_message = state.messages[-1].content if state.messages else ""
     new_message = intro_template.format(
-        user_message=state.messages[-1].content,
+        user_message=last_message,
         format_instructions=parser.get_format_instructions()
     )
     
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, old_messages + [('user', new_message)], parser)
-    
-    # Whether success or fail, parsed_response is a dictionary with keys "response" and "next_node"
-    response = parsed_response["response"]
-    next_node = parsed_response["next_node"]
-    
+    parsed_response = structured_invoke(llm, [('user', new_message)], parser)
+
     # Update state with the response
-    state.messages += [AIMessage(content=response)]
-    state.next_node = next_node
-        
-    # If next node is info_collector or reattempt_live_contact, set wants_callback flag
-    if state.next_node in ["info_collector", "reattempt_live_contact"]:
-        state.conversation_state.wants_callback = True
-    
+    response, next_node, failed_parsing = update_state(parsed_response, state)
+
+    print(f"Sophie: {response}")
+
+    if next_node == "router" and not failed_parsing:
+        # Attempt to transfer to live contact
+        transfer_success = attempt_transfer()
+        if not transfer_success:
+            transfer_failure_message = "Our sales director is not currently available, but I am a virtual assistant, and I am able to answer basic questions about our community. Would you like to speak with me, or leave a message for Jami?"
+            print(f"Sophie: {transfer_failure_message}")
+            state.messages += [AIMessage(content=transfer_failure_message)]
+
     return state
 
 def router(state: AgentState) -> AgentState:

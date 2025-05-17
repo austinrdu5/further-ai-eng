@@ -5,12 +5,11 @@
     - if user is asking for community phone number or an exsiting vendor or resident, provide the community phone number and ask if they have other questions (next node is `intro`)
     - if user is asking about employment, direct to careers page and ask for other questions (next node is `intro`)
     - else, attempt a live contact (function call to `attempt_transfer`), and when failed, tells the user that it's a virtual assistant and asks if it wants to leave info for a callback or continue with the conversation
-        - if callback, next node is `info_collector` with state.conversation_state.wants_callback = True
-        - if continue, next node is `router`
 
 2. `router`: This is an internal routing node that (usually) has no message to the user. However...
     - if state.conversation_state.is_first_message, respond with disclosure: "Before I answer, just so you know—This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
     - classify the user's question. 
+        - if user wants callback, next node is `reattempt_live_contact` with state.conversation_state.wants_callback = True
         - if user is asking for community phone number or an existing vendor or resident, provide the community phone number and ask if they have other questions (next node is `router`)
         - if user is asking about employment, direct to careers page and ask for other questions (next node is `router`)
         - if user wants callback, next node is `info_collector` with state.conversation_state.wants_callback = True

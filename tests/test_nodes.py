@@ -1,4 +1,5 @@
 import pytest
+import re
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from langchain_core.messages import HumanMessage, AIMessage
@@ -13,28 +14,22 @@ from nodes import (
     knowledge_base
 )
 
-@pytest.fixture
-def base_state():
-    """Create a base state for testing."""
-    return AgentState(
-        messages=[AIMessage(content="Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?")],
-        conversation_state=ConversationState(),
-        user_info=UserInfo(),
-    )
-
+# Intro Node Tests
+@pytest.mark.intro
 def test_intro_node_phone_request(base_state):
     """Test intro node handling phone number request."""
     # Setup
-    base_state.messages = [HumanMessage(content="What's your phone number?")]
+    base_state.messages = [HumanMessage(content="What's the community phone number?")]
     
     # Execute
     result = intro(base_state)
     
     # Verify
     assert result.next_node == "intro"
-    assert len(result.messages) == 2  # User message + AI response
-    assert "850-445-8362" in result.messages[1].content
+    assert len(result.messages) == 2
+    assert re.search(r"8\s*5\s*0\s*[-()]*\s*4\s*4\s*5\s*[-()]*\s*8\s*3\s*6\s*2", result.messages[-1].content)
 
+@pytest.mark.intro
 def test_intro_node_employment_request(base_state):
     """Test intro node handling employment request."""
     # Setup
@@ -48,6 +43,7 @@ def test_intro_node_employment_request(base_state):
     assert len(result.messages) == 2
     assert "careers" in result.messages[1].content.lower()
 
+@pytest.mark.intro
 def test_intro_node_callback_request(base_state):
     """Test intro node handling callback request."""
     # Setup
@@ -57,26 +53,13 @@ def test_intro_node_callback_request(base_state):
     result = intro(base_state)
     
     # Verify
-    assert result.next_node == "info_collector"
-    assert result.conversation_state.wants_callback == True
+    assert result.next_node == "router"
 
-def test_intro_node_rephrase_query(base_state):
-    """Test intro node rephrasing query."""
+@pytest.mark.intro
+def test_intro_node_state_transition_to_router(base_state):
+    """Test intro node state transition to router."""
     # Setup
-    base_state.messages = [HumanMessage(content="Hi there")]
-    
-    # Execute
-    result = intro(base_state)
-    
-    # Verify
-    assert result.next_node == "intro"
-    assert len(result.messages) == 2
-    assert "Hello" in result.messages[1].content
-
-def test_intro_node_failed_live_contact(base_state):
-    """Test intro node handling failed live contact."""
-    # Setup
-    base_state.messages = [HumanMessage(content="I need help")]
+    base_state.messages = [HumanMessage(content="I need information about pricing")]
     
     # Execute
     result = intro(base_state)
@@ -84,8 +67,12 @@ def test_intro_node_failed_live_contact(base_state):
     # Verify
     assert result.next_node == "router"
     assert len(result.messages) == 2
-    assert "virtual assistant" in result.messages[1].content.lower()
+    assert "director of sales" in result.messages[1].content.lower()
+    assert not result.failed_parsing
+    assert result.n_parsing_fails == 0
 
+# Router Node Tests
+@pytest.mark.router
 def test_router_first_message_disclosure(base_state):
     """Test router adds disclosure for first message."""
     # Setup
@@ -100,6 +87,7 @@ def test_router_first_message_disclosure(base_state):
     assert "conversation is being recorded" in result.messages[1].content
     assert not result.conversation_state.is_first_message
 
+@pytest.mark.router
 def test_router_phone_request(base_state):
     """Test router handling phone number request."""
     # Setup
@@ -112,6 +100,7 @@ def test_router_phone_request(base_state):
     assert result.next_node == "router"
     assert "850-445-8362" in result.messages[-1].content
 
+@pytest.mark.router
 def test_router_tour_request(base_state):
     """Test router handling tour request."""
     # Setup
@@ -123,6 +112,7 @@ def test_router_tour_request(base_state):
     # Verify
     assert result.next_node == "tour_scheduler"
 
+@pytest.mark.router
 def test_router_floorplan_request(base_state):
     """Test router handling floorplan request."""
     # Setup
@@ -135,6 +125,7 @@ def test_router_floorplan_request(base_state):
     assert result.next_node == "info_collector"
     assert result.conversation_state.wants_brochure == True
 
+@pytest.mark.router
 def test_router_frustration(base_state):
     """Test router handling frustration."""
     # Setup
@@ -146,6 +137,7 @@ def test_router_frustration(base_state):
     # Verify
     assert result.next_node == "reattempt_live_contact"
 
+@pytest.mark.router
 def test_router_employment_request(base_state):
     """Test router handling employment request."""
     # Setup
@@ -158,6 +150,7 @@ def test_router_employment_request(base_state):
     assert result.next_node == "router"
     assert "careers" in result.messages[-1].content.lower()
 
+@pytest.mark.router
 def test_router_callback_request(base_state):
     """Test router handling callback request."""
     # Setup
@@ -170,6 +163,7 @@ def test_router_callback_request(base_state):
     assert result.next_node == "info_collector"
     assert result.conversation_state.wants_callback == True
 
+@pytest.mark.router
 def test_router_knowledge_base_routing(base_state):
     """Test router handling knowledge base routing."""
     # Setup
@@ -182,6 +176,8 @@ def test_router_knowledge_base_routing(base_state):
     assert result.next_node == "knowledge_base"
     assert result.conversation_state.inquiry_type == "community_details"
 
+# Reattempt_live_contact Node Tests
+@pytest.mark.reattempt_live_contact
 def test_reattempt_live_contact_first_attempt(base_state):
     """Test reattempt_live_contact on first attempt."""
     # Setup
@@ -196,6 +192,7 @@ def test_reattempt_live_contact_first_attempt(base_state):
     assert len(result.messages) == 2  # Original message + pause message
     assert "[10 second pause]" in result.messages[1].content
 
+@pytest.mark.reattempt_live_contact
 def test_reattempt_live_contact_quick_retry(base_state):
     """Test reattempt_live_contact when retrying too quickly."""
     # Setup
@@ -209,6 +206,8 @@ def test_reattempt_live_contact_quick_retry(base_state):
     assert result.next_node == "info_collector"
     assert len(result.messages) == 1  # No pause message added
 
+# Info_collector Node Tests
+@pytest.mark.info_collector
 def test_info_collector_incomplete(base_state):
     """Test info_collector with incomplete information."""
     # Setup
@@ -223,6 +222,7 @@ def test_info_collector_incomplete(base_state):
     assert not result.user_info.email
     assert not result.user_info.phone
 
+@pytest.mark.info_collector
 def test_info_collector_complete(base_state):
     """Test info_collector with complete information."""
     # Setup
@@ -242,6 +242,7 @@ def test_info_collector_complete(base_state):
     assert result.user_info.email == "john@example.com"
     assert result.user_info.phone == "555-123-4567"
 
+@pytest.mark.info_collector
 def test_info_collector_brochure_request(base_state):
     """Test info_collector handling brochure request."""
     # Setup
@@ -255,6 +256,8 @@ def test_info_collector_brochure_request(base_state):
     assert result.next_node == "info_collector"
     assert "brochure" in result.messages[-1].content.lower()
 
+# Tour_scheduler Node Tests
+@pytest.mark.tour_scheduler
 def test_tour_scheduler_first_attempt(base_state):
     """Test tour_scheduler on first attempt."""
     # Setup
@@ -267,6 +270,7 @@ def test_tour_scheduler_first_attempt(base_state):
     assert result.next_node == "tour_scheduler"
     assert result.conversation_state.tour_scheduling_attempts == 1
 
+@pytest.mark.tour_scheduler
 def test_tour_scheduler_max_attempts(base_state):
     """Test tour_scheduler after max attempts."""
     # Setup
@@ -280,6 +284,7 @@ def test_tour_scheduler_max_attempts(base_state):
     assert result.next_node == "info_collector"
     assert result.conversation_state.wants_callback == True
 
+@pytest.mark.tour_scheduler
 def test_tour_scheduler_successful(base_state):
     """Test tour_scheduler with successful scheduling."""
     # Setup
@@ -300,6 +305,7 @@ def test_tour_scheduler_successful(base_state):
     assert result.user_info.first_name == "John"
     assert result.user_info.email == "john@example.com"
 
+@pytest.mark.tour_scheduler
 def test_tour_scheduler_date_time_handling(base_state):
     """Test tour_scheduler handling specific date/time."""
     # Setup
@@ -317,6 +323,8 @@ def test_tour_scheduler_date_time_handling(base_state):
     assert "Monday" in result.messages[-1].content
     assert "3pm" in result.messages[-1].content
 
+# Knowledge_base Node Tests
+@pytest.mark.knowledge_base
 def test_knowledge_base_pricing(base_state):
     """Test knowledge_base handling pricing inquiry."""
     # Setup
@@ -331,6 +339,7 @@ def test_knowledge_base_pricing(base_state):
     assert len(result.messages) == 2
     assert "$" in result.messages[1].content
 
+@pytest.mark.knowledge_base
 def test_knowledge_base_unknown_topic(base_state):
     """Test knowledge_base handling unknown topic."""
     # Setup
@@ -344,6 +353,7 @@ def test_knowledge_base_unknown_topic(base_state):
     assert result.next_node == "reattempt_live_contact"
     assert "only have information about" in result.messages[1].content.lower()
 
+@pytest.mark.knowledge_base
 def test_knowledge_base_community_details(base_state):
     """Test knowledge_base handling community details inquiry."""
     # Setup
@@ -358,6 +368,7 @@ def test_knowledge_base_community_details(base_state):
     assert len(result.messages) == 2
     assert "community" in result.messages[1].content.lower()
 
+@pytest.mark.knowledge_base
 def test_knowledge_base_financing(base_state):
     """Test knowledge_base handling financing inquiry."""
     # Setup
@@ -372,6 +383,7 @@ def test_knowledge_base_financing(base_state):
     assert len(result.messages) == 2
     assert "financing" in result.messages[1].content.lower()
 
+@pytest.mark.knowledge_base
 def test_knowledge_base_continue_vs_redirect(base_state):
     """Test knowledge_base handling user choice to continue vs redirect."""
     # Setup
@@ -531,4 +543,4 @@ def test_knowledge_base_edge_case_responses(base_state):
     assert len(result.messages) == 4
     assert "specific" in result.messages[-1].content.lower()
     assert "guarantee" in result.messages[-1].content.lower()
-    assert "best" in result.messages[-1].content.lower() 
+    assert "best" in result.messages[-1].content.lower()
