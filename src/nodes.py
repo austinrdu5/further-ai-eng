@@ -1,15 +1,61 @@
 import json
 import re
-from typing import Optional
+import logging
+from typing import Optional, Literal, Callable, TypeVar, Any, List, Tuple
+from functools import wraps
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
+from langchain.output_parsers import StructuredOutputParser, ResponseSchema
+from langchain_core.exceptions import OutputParserException
 
 from state import AgentState
 from knowledge import KNOWLEDGE_BASE, CURRENT_DATETIME
 
+# Set up logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Create console handler with formatting
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
 # LLM setup
-llm = ChatOpenAI(temperature=0.7, model="gpt-4")
+llm = ChatOpenAI(temperature=0.1, model="gpt-4")  # Lower temperature for more structured outputs
+
+def structured_invoke(llm: ChatOpenAI, 
+                     messages: List[Tuple[str, str]],
+                     parser: StructuredOutputParser, 
+                     max_retries: int = 3) -> dict:
+    """
+    Helper function to invoke LLM with retries for structured output.
+    
+    Args:
+        llm: The LLM instance to use
+        messages: List of (role, content) message tuples
+        parser: The StructuredOutputParser to use
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        Parsed response dictionary on success or apologetic response dictionary on failure
+    """
+    for attempt in range(max_retries):
+        try:
+            response = llm.invoke(messages)
+            return parser.parse(response.content)
+        except OutputParserException as e:
+            logger.error(f"OutputParserException on attempt {attempt + 1}/{max_retries}: {e}")
+            continue
+
+    logger.error("All retry attempts failed")
+    return {
+        "response": "I apologize, but I'm having trouble processing your request. Let me connect you with someone who can help.",
+        "next_node": "reattempt_live_contact"
+    }
 
 def intro(state: AgentState) -> AgentState:
     """First interaction with the user."""
@@ -19,68 +65,56 @@ def intro(state: AgentState) -> AgentState:
         state.next_node = "router"
         return state
     
-    # Define the system prompt for the initial greeting
-    intro_system_prompt = """
-    You are Sophie, a virtual sales specialist at ACME Senior Living. 
+    # Create output parser
+    parser = StructuredOutputParser.from_response_schemas([
+        ResponseSchema(name="response", description="The full response message to the user"),
+        ResponseSchema(name="next_node", description="The next node to route to (must be either 'intro' or 'router')")
+    ])
     
-    For the user's first question:
-    1. Greet them warmly with: "Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?"
-    2. After they ask a question, paraphrase it briefly and say: "Got it! I can definitely help with that. Let me check if my director of sales is available for a conversation. Please hold."
-    3. Then say: "Our sales director is not currently available, but I am a virtual assistant, and I am able to answer basic questions about our community. Would you like to speak with me, or leave a message for Jami."
-    4. Add: "Before I answer, just so you know—This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
-    5. Finally, answer their question starting with "About your query on [topic]..." and be helpful and friendly.
+    # Define the system prompt for the initial greeting and routing
+    intro_template = """
+    Last user message: {user_message}
     
-    Be conversational, concise, and human-like. Use everyday language and don't be robotic.
+    Instructions:
+    1. Rephrase the user's query to confirm understanding: Got it! I can definitely help with that.
+    2. Analyze the user's question for the following cases:
+        - If asking for community phone number or about existing vendor/resident:
+            - Provide number: (850)-445-8362
+            - Ask if they have other questions
+            - Set next_node to "intro"
+        - If asking about employment:
+            - Direct to careers page: https://www.talkfurther.com/events-demo
+            - Ask if they have other questions  
+            - Set next_node to "intro"
+        - For all other queries:
+            - "Let me check if my director of sales is available for a conversation. Please hold."
+            - Set next_node to "router"
+    3. Be conversational, concise, and human-like. Use everyday language and don't be robotic.
+    
+    {format_instructions}
     """
     
-    # If this is the very first interaction
-    if len(state.messages) == 1 and isinstance(state.messages[0], HumanMessage):
-        # Create the prompt template with system message first
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", intro_system_prompt),
-            ("human", state.messages[0].content)
-        ])
+    old_messages = state.messages[:-1].to_messages()
+    new_message = intro_template.format(
+        user_message=state.messages[-1].content,
+        format_instructions=parser.get_format_instructions()
+    )
+    
+    # Get structured response with retries
+    parsed_response = structured_invoke(llm, old_messages + [('user', new_message)], parser)
+    
+    # Whether success or fail, parsed_response is a dictionary with keys "response" and "next_node"
+    response = parsed_response["response"]
+    next_node = parsed_response["next_node"]
+    
+    # Update state with the response
+    state.messages += [AIMessage(content=response)]
+    state.next_node = next_node
         
-        # Get response from LLM
-        response = llm.invoke(
-            prompt.to_messages()
-        )
-        
-        # Update state
-        state.messages = [AIMessage(content=response.content)]
-        state.conversation_state.intro_completed = True
-        
-        # Check for specific inquiry types
-        inquiry_check_prompt = """
-        Based on the user's message: "{user_message}"
-        
-        Determine if the user is:
-        1. Asking for community phone number or about an existing vendor/resident
-        2. Asking about employment
-        3. Wanting a callback
-        4. None of the above
-        
-        Respond with ONLY one of: "phone", "employment", "callback", or "other"
-        """
-        
-        inquiry_type = llm.invoke(
-            inquiry_check_prompt.format(user_message=state.messages[0].content)
-        ).content.strip().lower()
-        
-        # Set the next node based on inquiry type
-        if inquiry_type == "phone":
-            state.next_node = "intro"  # Stay in intro to handle phone number request
-        elif inquiry_type == "employment":
-            state.next_node = "intro"  # Stay in intro to handle employment request
-        elif inquiry_type == "callback":
-            state.next_node = "info_collector"
-            state.conversation_state.wants_callback = True
-        else:
-            state.next_node = "router"
-    else:
-        # If not the first interaction, proceed to router
-        state.next_node = "router"
-        
+    # If next node is info_collector or reattempt_live_contact, set wants_callback flag
+    if state.next_node in ["info_collector", "reattempt_live_contact"]:
+        state.conversation_state.wants_callback = True
+    
     return state
 
 def router(state: AgentState) -> AgentState:

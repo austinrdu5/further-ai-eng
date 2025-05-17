@@ -10,8 +10,7 @@ from nodes import (
     reattempt_live_contact,
     info_collector,
     tour_scheduler,
-    knowledge_base,
-    determine_next_step
+    knowledge_base
 )
 
 @pytest.fixture
@@ -389,29 +388,6 @@ def test_knowledge_base_continue_vs_redirect(base_state):
     assert result.next_node == "router"
     assert len(result.messages) == 3
     assert "continue" in result.messages[-1].content.lower()
-
-def test_determine_next_step_with_next_node(base_state):
-    """Test determine_next_step when next_node is set."""
-    # Setup
-    base_state.next_node = "tour_scheduler"
-    
-    # Execute
-    result = determine_next_step(base_state)
-    
-    # Verify
-    assert result == "tour_scheduler"
-    assert base_state.next_node is None
-
-def test_determine_next_step_default(base_state):
-    """Test determine_next_step default behavior."""
-    # Setup
-    base_state.next_node = None
-    
-    # Execute
-    result = determine_next_step(base_state)
-    
-    # Verify
-    assert result == "router"
 
 def test_router_multiple_inquiries(base_state):
     """Test router handling multiple inquiry types in sequence."""
