@@ -1,5 +1,4 @@
-from datetime import datetime
-
+# TODO: better organization of knowledge base?
 # Knowledge base with all the community information
 KNOWLEDGE_BASE = {
     "community_info": {
@@ -36,7 +35,17 @@ KNOWLEDGE_BASE = {
         "dining_areas": ["Dining room", "In-room dining", "Restaurant-style meal service"],
         "outdoor_activities": ["Accompanied walks", "Park visits", "Walking trails", "Day trips"],
         "outdoor_areas": ["Courtyard", "Garden", "Outdoor areas suitable for walking"],
-        "fitness_exercise": ["Gym or fitness room", "Exercise pool", "Yoga"]
+        "fitness_exercise": ["Gym or fitness room", "Exercise pool", "Yoga"],
+        "medical_services": {
+            "respite_care": True,
+            "hospice": False,
+            "skilled_nursing": True,
+            "adult_day_care": False,
+            "physical_therapy": "Onsite physical therapy (third party provider)",
+            "speech_therapy": None,  # No information available
+            "transportation": ["Scheduled local transportation", "Transportation to medical appointments"],
+            "private_aides": True
+        }
     },
     "policies": {
         "pets": {
@@ -57,19 +66,9 @@ KNOWLEDGE_BASE = {
             "ltc_insurance": False,
             "veterans_benefits": True,
             "bridge_loan": True
-        },
-        "services_available": {
-            "respite_care": True,
-            "hospice": False,
-            "skilled_nursing": True,
-            "adult_day_care": False,
-            "physical_therapy": "Onsite physical therapy (third party provider)",
-            "speech_therapy": None,  # No information available
-            "transportation": ["Scheduled local transportation", "Transportation to medical appointments"],
-            "private_aides": True
         }
+    },
+    "employment": {
+        "careers_page": "https://www.talkfurther.com/events-demo"
     }
 }
-
-# Current date and time for the system
-CURRENT_DATETIME = datetime.strptime("2025-03-04 05:40", "%Y-%m-%d %H:%M")

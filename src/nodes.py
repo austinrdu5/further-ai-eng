@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
 from langchain_core.exceptions import OutputParserException
 
-from state import AgentState
-from knowledge import KNOWLEDGE_BASE, CURRENT_DATETIME
+from state import AgentState, handle_failed_parsing
+from knowledge import KNOWLEDGE_BASE
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -68,7 +68,8 @@ def structured_invoke(llm: ChatOpenAI,
 
 def intro(state: AgentState) -> AgentState:
     """First interaction with the user."""
-
+    logger.info("Starting intro node")
+    
     # Define the system prompt for the initial greeting and routing
     intro_prompt = """
     Last user message: {user_message}
@@ -111,53 +112,43 @@ def intro(state: AgentState) -> AgentState:
     # Get structured response with retries
     parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
 
-    # Whether success or fail, parsed_response is a dictionary with keys "response" and "next_node"
+    # If failed parsing, handle it
+    if parsed_response.get("failed_parsing"):
+        state = handle_failed_parsing(state, logger)
+        return state
+
+    # If success, execute node's logic
     response = parsed_response["response"]
     next_node = parsed_response.get("next_node")
-    failed_parsing = parsed_response.get("failed_parsing", False)
 
-    # Update state with the response
-    state.messages += [AIMessage(content=response)]
+    print(f"Sophie: {response}")   
+
+    state.messages.append(AIMessage(content=response))
     state.next_node = next_node
-    if failed_parsing:
-        state.failed_parsing = True
-        state.n_parsing_fails += 1
 
-    # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
-    if state.n_parsing_fails >= 3:
-        print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
-        state.next_node = None
-        return state
-    
-    # If normal failure, send to router
-    if failed_parsing:
-        failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
-        print(failed_parsing_message)
-        state.messages += [AIMessage(content=failed_parsing_message)]
-        state.next_node = "router"
-        return state
-
-    # If not failed, execute node's logic
-    print(f"Sophie: {response}")            
-
-    if next_node == "router" and not failed_parsing:
-        # Attempt to transfer to live contact
+    if next_node == "router":
+        # First try to transfer to live contact
         transfer_success = attempt_transfer()
-        # update time of transfer attempt
+        logger.info("Attempting transfer to live contact")
         state.conversation_state.time_of_transfer_attempt = datetime.now()
+
         if transfer_success:
-            # end conversation
+            logger.info("Successfully transferred to live contact")
+            # End conversation
             state.next_node = None
             return state
         else:
+            logger.info("Transfer to live contact failed, continuing with virtual assistant")
             transfer_failure_message = "Our sales director is not currently available, but I am a virtual assistant, and I am able to answer basic questions about our community. Would you like to speak with me, or leave a message for Jami?"
             print(f"Sophie: {transfer_failure_message}")
             state.messages += [AIMessage(content=transfer_failure_message)]
 
+    logger.info(f"Intro node complete, transitioning to {state.next_node}")
     return state
 
 def router(state: AgentState) -> AgentState:
     """Routes the conversation to the appropriate handler based on the latest message."""
+    logger.info("Starting router node")
     
     # Define the system prompt for routing
     routing_prompt = """
@@ -170,20 +161,19 @@ def router(state: AgentState) -> AgentState:
         - floorplan: Floorplan request
         - frustration: Frustration with AI
         - knowledge: a general question about the community
-            - pricing: cost of care
-            - amenities: what activities/services are available (including questions about community details, features, or what the community offers)
-            - financing: financing options (Medicaid, VA, etc.)
-            - phone: asking for the community phone number
-            - employment: Employment inquiry
-            - uncategorized: For all other cases
+            - community_info: about community name, phone number, address, smoking policy, care types, room types, capacity, minimum age, entrance fee, cost, price, tour hours
+            - amenities: about activities, services, features, rooms, dining, fitness, medical services, etc.
+            - policies: about pets, cars, couples, wheelchairs, visiting hours, security, lease term, languages, payment options, etc.
+            - employment: about jobs at the community
+        - off_topic: not about the community
 
     {format_instructions}
     """
 
     # Create output parser
     parser = StructuredOutputParser.from_response_schemas([
-        ResponseSchema(name="category", description="The category of the user's request (must be either callback, tour, floorplan, frustration, or knowledge)"),
-        ResponseSchema(name="inquiry_type", description="The type of inquiry for knowledge category (must be either pricing, amenities, financing, phone, employment, or uncategorized)")
+        ResponseSchema(name="category", description="The category of the user's request (must be either callback, tour, floorplan, frustration, knowledge, or off_topic)"),
+        ResponseSchema(name="inquiry_types", description="The type(s) of inquiry for knowledge category (can be one or more of: community_info, amenities, policies, or employment)", required=False)
     ])
     
     # Get the last message and validate it
@@ -201,33 +191,16 @@ def router(state: AgentState) -> AgentState:
     parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
         
     if parsed_response.get("failed_parsing"):
-        state.failed_parsing = True
-        state.n_parsing_fails += 1
-
-        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
-        if state.n_parsing_fails >= 3:
-            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
-            state.next_node = None
-            return state
-        
-        # If normal failure, send to router
-        else:
-            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
-            print(failed_parsing_message)
-            state.messages += [AIMessage(content=failed_parsing_message)]
-            state.next_node = "router"
-            return state
+        state = handle_failed_parsing(state, logger)
+        return state
         
     # Extract the classification
     category = parsed_response.get("category", "knowledge")
-    inquiry_type = parsed_response.get("inquiry_type", "uncategorized")
-    
-    # Post-process inquiry type for community details
-    if inquiry_type == "uncategorized" and any(term in last_message.content.lower() for term in ["community details", "community features", "what does the community offer", "what's in the community"]):
-        inquiry_type = "amenities"
+    logger.info(f"Router classified user intent as: {category}")
     
     # If this is the first message after intro, add disclosure
     if not state.conversation_state.disclosure_given:
+        logger.info("First message after intro, adding disclosure")
         disclosure = "Before I answer, just so you know—This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
         print(f"Sophie: {disclosure}")
         state.messages.append(AIMessage(content=disclosure))
@@ -235,57 +208,90 @@ def router(state: AgentState) -> AgentState:
     
     # Set the next node based on the category
     if category == "callback":
+        logger.info("Routing to reattempt_live_contact for callback request")
         state.next_node = "reattempt_live_contact"
+
     elif category == "tour":
+        logger.info("Routing to tour_scheduler for tour request")
         state.next_node = "tour_scheduler"
+
     elif category == "floorplan":
+        logger.info("Routing to info_collector for floorplan request")
         state.next_node = "info_collector"
         state.conversation_state.wants_brochure = True
+
     elif category == "frustration":
+        logger.info("Routing to reattempt_live_contact for frustrated user")
         state.next_node = "reattempt_live_contact"
-    else:  # knowledge category
+
+    elif category == "knowledge":
+        logger.info("Routing to knowledge_base for general inquiry")
         state.next_node = "knowledge_base"
-        state.conversation_state.inquiry_type = inquiry_type
+
+        # TODO: do we need to trim down to only the relevant knowledge?
+        # state.conversation_state.inquiry_types = []
+        # inquiry_types = parsed_response.get("inquiry_types", [])
+        # logger.info(f"Knowledge inquiry types: {inquiry_types}")
+        # for inquiry_type in ["community_info", "amenities", "policies", "employment", "pricing", "financing", "uncategorized", "phone"]:
+        #     if inquiry_type in inquiry_types:
+        #         state.conversation_state.inquiry_types.append(inquiry_type)
+
+    elif category == "off_topic":
+        off_topic_message = "Sophie: I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
+        print(off_topic_message)
+        state.messages += [AIMessage(content=off_topic_message)]
+        state.next_node = "router"
+
+    else:
+        logger.error(f"Invalid category: {category}, defaulting to router")
+        state.next_node = "router"
     
+    logger.info(f"Router node complete, transitioning to {state.next_node}")
     return state
 
 def reattempt_live_contact(state: AgentState) -> AgentState:
     """Handles reattempting live contact for frustrated users."""
+    logger.info("Starting reattempt_live_contact node")
     
     # Set callback flag
     state.conversation_state.wants_callback = True
-    
+
     TWO_MINUTES = 120
     now = datetime.now()
-    last_attempt = state.conversation_state.time_of_transfer_attempt
-    if last_attempt is None:
-        last_attempt = now - timedelta(seconds=TWO_MINUTES+1)  # force as if enough time has passed
-    time_since_last_attempt = now - last_attempt
+    time_of_last_attempt = state.conversation_state.time_of_transfer_attempt
+    time_since_last_attempt = now - time_of_last_attempt
     
     # Early exit to info_collector if not enough time has passed
-    if time_since_last_attempt.total_seconds() <= TWO_MINUTES:
+    if time_of_last_attempt is not None and time_since_last_attempt.total_seconds() <= TWO_MINUTES:
+        logger.info("Not enough time since last transfer attempt, routing to info_collector")
         state.next_node = "info_collector"
         return state
     
     # Else, attempt to transfer to live contact
-    transfer_success = attempt_transfer()
+    logger.info("Attempting transfer to live contact")
     state.conversation_state.time_of_transfer_attempt = now
+    transfer_success = attempt_transfer()
 
     if transfer_success:
-        # end conversation
+        logger.info("Successfully transferred to live contact")
+        # End conversation
         state.next_node = None
         return state
-    else:
-        transfer_failure_message = "Our sales director is not currently available, but I can take a message and have them call you back."
-        print(f"Sophie: {transfer_failure_message}")
-        state.messages += [AIMessage(content=transfer_failure_message)]
     
-    # Proceed to info collector
+    # If transfer fails, proceed to info_collector
+    logger.info("Transfer to live contact failed, proceeding to info_collector")
+
+    transfer_failure_message = "Our sales director is not currently available, but I can take a message and have them call you back."
+    print(f"Sophie: {transfer_failure_message}")
+
     state.next_node = "info_collector"
+    state.messages += [AIMessage(content=transfer_failure_message)]
+
     return state
 
 def info_collector(state: AgentState) -> AgentState:
     """Collects contact information from the user."""
+    logger.info("Starting info_collector node")
     
     user_fields = {
         'first_name': 'first name',
@@ -358,32 +364,19 @@ def info_collector(state: AgentState) -> AgentState:
     # Get structured response with retries
     parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
 
+    # If failed parsing, handle it
     if parsed_response.get("failed_parsing"):
-        state.failed_parsing = True
-        state.n_parsing_fails += 1
+        state = handle_failed_parsing(state, logger)
+        return state
 
-        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
-        if state.n_parsing_fails >= 3:
-            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
-            state.next_node = None
-            return state
-        
-        # If normal failure, send to router
-        else:
-            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
-            print(failed_parsing_message)
-            state.messages += [AIMessage(content=failed_parsing_message)]
-            state.next_node = "router"
-            return state
-
-    # If success, parsed_response is a dictionary
+    # If success, execute node's logic
     response = parsed_response["response"]
     user_info = parsed_response["user_info"]
 
     print(f"Sophie: {response}")     
-
-    # Update state with the response and user info
     state.messages += [AIMessage(content=response)]
+
+    # Update state with user info
     for field, _ in user_fields.items():
         if field == 'extra_information':
             state.user_info.extra_information.update(user_info.get(field, {}))
@@ -398,23 +391,29 @@ def info_collector(state: AgentState) -> AgentState:
     )
 
     if all_collected:
+        logger.info("All required information collected, routing to router")
         state.next_node = "router"
     else:
+        logger.info("Missing required information, staying in info_collector")
         state.next_node = "info_collector"
     
+    logger.info(f"Info_collector node complete, transitioning to {state.next_node}")
     return state
 
 def tour_scheduler(state: AgentState) -> AgentState:
     """Handles tour scheduling requests."""
+    logger.info("Starting tour_scheduler node")
     
     # Early exit if we've exceeded the maximum attempts
     if state.conversation_state.tour_scheduling_attempts >= 3:
+        logger.warning("Exceeded maximum tour scheduling attempts, routing to reattempt_live_contact")
         print("Sophie: I apologize, but I'm having trouble scheduling your tour. Let me see if I can transfer you to a live representative.")
         state.next_node = "reattempt_live_contact"
         return state
     
     # Increment tour scheduling attempts
     state.conversation_state.tour_scheduling_attempts += 1
+    logger.info(f"Tour scheduling attempt {state.conversation_state.tour_scheduling_attempts}")
     
     tour_scheduler_prompt = """
     Last user message: {user_message}
@@ -477,24 +476,11 @@ def tour_scheduler(state: AgentState) -> AgentState:
     # Get structured response with retries
     parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
 
+    # If failed parsing, handle it
     if parsed_response.get("failed_parsing"):
-        state.failed_parsing = True
-        state.n_parsing_fails += 1
-
-        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
-        if state.n_parsing_fails >= 3:
-            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
-            state.next_node = None
-            return state
-        
-        # If normal failure, send to tour_scheduler
-        else:
-            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
-            print(failed_parsing_message)
-            state.messages += [AIMessage(content=failed_parsing_message)]
-            state.next_node = "tour_scheduler"
-            return state
-
+        state = handle_failed_parsing(state, logger)
+        return state
+    
     # If success, execute node's logic
     response = parsed_response["response"]
     tour_scheduled = parsed_response["tour_scheduled"].lower() == 'true'  # Convert string to boolean
@@ -517,94 +503,84 @@ def tour_scheduler(state: AgentState) -> AgentState:
             state.user_info.phone = user_info["phone"]
 
     if not tour_scheduled:
+        logger.info("Tour not yet scheduled, staying in tour_scheduler")
         state.next_node = "tour_scheduler"
     else:
+        logger.info(f"Tour scheduled for {tour_date} at {tour_time}")
         # Update state with the tour information
         state.conversation_state.tour_date = tour_date
         state.conversation_state.tour_time = tour_time
         state.conversation_state.tour_scheduled = True
         state.next_node = "router"
 
+    logger.info(f"Tour_scheduler node complete, transitioning to {state.next_node}")
     return state
 
 def knowledge_base(state: AgentState) -> AgentState:
     """Handles inquiries using the knowledge base."""
+    logger.info("Starting knowledge_base node")
     
-    # Get the inquiry type from state
-    inquiry_type = state.conversation_state.inquiry_type
-    
-    # Get relevant knowledge from the knowledge base
-    knowledge = KNOWLEDGE_BASE.get(inquiry_type, {})
-    
-    knowledge_base_prompt = """
-    You are Sophie, a virtual sales specialist at ACME Senior Living.
-    
+    knowledge_prompt = """
+    Last user message: {user_message}
+
+    Instructions:
     Use this information to answer the user's question:
     {knowledge}
     
-    If you can answer their question with this information, do so and ask if there's anything else they need.
+    If you can answer their question with this information:
+    1. Provide a clear, direct answer
+    2. Include relevant details from the knowledge base
+    3. End with "Is there anything else you would like to know?"
     
-    If you cannot answer their question with this information, apologize and explain that you only have information about pricing, community details, and financing. Ask if they would like to be redirected to a human.
-    
-    Be conversational and human-like. Respond directly to what they just asked.
-    """
-    
-    # Get the conversation history
-    messages = state.messages
-    
-    # Create the prompt template
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", knowledge_base_prompt.format(knowledge=json.dumps(knowledge, indent=2))),
-        MessagesPlaceholder(variable_name="messages"),
-    ])
-    
-    # Get response from LLM
-    response = llm.invoke(
-        prompt.invoke({"messages": messages}).to_messages()
-    )
-    
-    # Update state with the response
-    state.messages.append(AIMessage(content=response.content))
-    
-    # Check if the response suggests redirecting to a human
-    redirect_check_prompt = """
-    Based on the last AI message, does Sophie suggest redirecting to a human?
-    Respond with ONLY "yes" or "no".
-    
-    Last AI message: {last_ai_message}
-    """
-    
-    redirect_suggested = llm.invoke(
-        redirect_check_prompt.format(last_ai_message=response.content)
-    ).content.strip().lower()
-    
-    # Check for parsing failure
-    if redirect_suggested not in ["yes", "no"]:
-        state.failed_parsing = True
-        state.n_parsing_fails += 1
-
-        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
-        if state.n_parsing_fails >= 3:
-            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
-            state.next_node = None
-            return state
+    If you cannot answer their question with this information:
+    1. Apologize and explain that you only have information about community details, amenities, and community policies
+    2. Ask if they would like to be redirected to a human
         
-        # If normal failure, send to router
-        else:
-            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
-            print(failed_parsing_message)
-            state.messages += [AIMessage(content=failed_parsing_message)]
-            state.next_node = "router"
-            return state
-    
-    # Set the next node based on whether a redirect is suggested
-    if redirect_suggested == "yes":
-        state.next_node = "reattempt_live_contact"
-    else:
-        state.next_node = "router"
-    
-    return state
+    Be conversational and human-like. Respond directly to what they just asked.
 
+    {format_instructions}
+    """
+    
+    # Create output parser
+    parser = StructuredOutputParser.from_response_schemas([
+        ResponseSchema(name="response", description="The full response message to the user"),
+    ])
+
+    # TODO: do we need to trim down to only the relevant knowledge?
+    # # Get the inquiry type from state
+    # inquiry_types = state.conversation_state.inquiry_types
+    # if len(inquiry_types) == 0:
+    #     inquiry_types = ["community_info"]
+    # 
+    # # Get relevant knowledge from the knowledge base
+    # knowledge = {}
+    # for inquiry_type in inquiry_types:
+    #     knowledge.update(KNOWLEDGE_BASE.get(inquiry_type, {}))
+    
+    last_message = state.messages[-1]
+    new_message = knowledge_prompt.format(user_message=last_message.content,
+                                          knowledge=json.dumps(KNOWLEDGE_BASE, indent=2), 
+                                          format_instructions=parser.get_format_instructions()
+    )
+
+    # Get structured response with retries
+    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+
+    if parsed_response.get("failed_parsing"):
+        state = handle_failed_parsing(state, logger)
+        return state
+
+    # If success, execute node's logic
+    response = parsed_response["response"]
+    
+    print(f"Sophie: {response}")
+    state.messages += [AIMessage(content=response)]
+
+    state.next_node = "router"
+    logger.info("Knowledge_base node complete, transitioning to router")
+
+    return state
+    
 def validator(state: AgentState) -> AgentState:
     """Validates the AI's response."""
     pass
