@@ -63,7 +63,6 @@ def structured_invoke(llm: ChatOpenAI,
     logger.error("All retry attempts failed")
     return {
         "response": "I apologize, but I'm having trouble processing your request. Let me try again.",
-        "next_node": "router",
         "failed_parsing": True
     }
 
@@ -99,7 +98,7 @@ def intro(state: AgentState) -> AgentState:
         ResponseSchema(name="next_node", description="The next node to route to (must be either 'intro' or 'router')")
     ])
 
-    last_message = state.messages[-1]
+    last_message = state.messages[-1]  # TODO: only parse human messages
     if not isinstance(last_message, HumanMessage):
         raise ValueError("Last message should be a HumanMessage")
     
@@ -110,11 +109,11 @@ def intro(state: AgentState) -> AgentState:
     )
     
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
 
     # Whether success or fail, parsed_response is a dictionary with keys "response" and "next_node"
     response = parsed_response["response"]
-    next_node = parsed_response["next_node"]
+    next_node = parsed_response.get("next_node")
     failed_parsing = parsed_response.get("failed_parsing", False)
 
     # Update state with the response
@@ -128,6 +127,14 @@ def intro(state: AgentState) -> AgentState:
     if state.n_parsing_fails >= 3:
         print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
         state.next_node = None
+        return state
+    
+    # If normal failure, send to router
+    if failed_parsing:
+        failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
+        print(failed_parsing_message)
+        state.messages += [AIMessage(content=failed_parsing_message)]
+        state.next_node = "router"
         return state
 
     # If not failed, execute node's logic
@@ -191,8 +198,26 @@ def router(state: AgentState) -> AgentState:
     )
     
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=new_message)], parser)
-    
+    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+        
+    if parsed_response.get("failed_parsing"):
+        state.failed_parsing = True
+        state.n_parsing_fails += 1
+
+        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
+        if state.n_parsing_fails >= 3:
+            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
+            state.next_node = None
+            return state
+        
+        # If normal failure, send to router
+        else:
+            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
+            print(failed_parsing_message)
+            state.messages += [AIMessage(content=failed_parsing_message)]
+            state.next_node = "router"
+            return state
+        
     # Extract the classification
     category = parsed_response.get("category", "knowledge")
     inquiry_type = parsed_response.get("inquiry_type", "uncategorized")
@@ -331,12 +356,31 @@ def info_collector(state: AgentState) -> AgentState:
     )
 
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
 
-    # Whether success or fail, parsed_response is a dictionary
+    if parsed_response.get("failed_parsing"):
+        state.failed_parsing = True
+        state.n_parsing_fails += 1
+
+        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
+        if state.n_parsing_fails >= 3:
+            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
+            state.next_node = None
+            return state
+        
+        # If normal failure, send to router
+        else:
+            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
+            print(failed_parsing_message)
+            state.messages += [AIMessage(content=failed_parsing_message)]
+            state.next_node = "router"
+            return state
+
+    # If success, parsed_response is a dictionary
     response = parsed_response["response"]
     user_info = parsed_response["user_info"]
-    failed_parsing = parsed_response.get("failed_parsing", False)
+
+    print(f"Sophie: {response}")     
 
     # Update state with the response and user info
     state.messages += [AIMessage(content=response)]
@@ -345,19 +389,6 @@ def info_collector(state: AgentState) -> AgentState:
             state.user_info.extra_information.update(user_info.get(field, {}))
         else:
             setattr(state.user_info, field, user_info.get(field, getattr(state.user_info, field)))
-    
-    if failed_parsing:
-        state.failed_parsing = True
-        state.n_parsing_fails += 1
-
-    # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
-    if state.n_parsing_fails >= 3:
-        print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
-        state.next_node = None
-        return state
-
-    # If not failed, execute node's logic
-    print(f"Sophie: {response}")       
     
     # Check if all required information has been collected
     all_collected = (
@@ -376,17 +407,29 @@ def info_collector(state: AgentState) -> AgentState:
 def tour_scheduler(state: AgentState) -> AgentState:
     """Handles tour scheduling requests."""
     
-    # Initialize tour scheduling attempts if not already set
-    if not hasattr(state.conversation_state, 'tour_scheduling_attempts'):
-        state.conversation_state.tour_scheduling_attempts = 0
-    
-    # Check if we've exceeded the maximum attempts
+    # Early exit if we've exceeded the maximum attempts
     if state.conversation_state.tour_scheduling_attempts >= 3:
+        print("Sophie: I apologize, but I'm having trouble scheduling your tour. Let me see if I can transfer you to a live representative.")
         state.next_node = "reattempt_live_contact"
         return state
     
+    # Increment tour scheduling attempts
+    state.conversation_state.tour_scheduling_attempts += 1
+    
     tour_scheduler_prompt = """
-    You are Sophie, a virtual sales specialist at ACME Senior Living.
+    Last user message: {user_message}
+    
+    Instructions:    
+    Your task is to schedule a tour for the potential resident. The user's previous messages and your conversation history will help you determine where they are in this process. Follow these steps:
+    
+    1. If you don't know their availability yet, ask when they would like to schedule the tour.
+    2. If they propose a time outside your available hours, politely inform them of your available times and ask for an alternative.
+    3. Once a valid time is agreed upon, confirm the tour date and time.
+    
+    Additionally, extract the user's information from the conversation history if available:
+    - If the user mentions their name (e.g., "my name is John Smith"), extract first_name and last_name.
+    - If the user provides an email address, extract it.
+    - If the user provides a phone number, extract it.
     
     Current date and time: {current_datetime}
     
@@ -394,102 +437,94 @@ def tour_scheduler(state: AgentState) -> AgentState:
     - Monday to Friday
     - Between 9:00 AM and 6:00 PM
     
-    Your task is to schedule a tour for the potential resident. Follow these steps:
+    Valid time formats include:
+    - "3pm" or "3 PM" or "3:00 PM"
+    - "2pm" or "2 PM" or "2:00 PM"
+    - "10am" or "10 AM" or "10:00 AM"
+    - "5pm" or "5 PM" or "5:00 PM"
     
-    1. If you don't know their availability yet, ask when they would like to schedule the tour.
-    2. If they propose a time outside your available hours, politely inform them of your available times and ask for an alternative.
-    3. Once a valid time is agreed upon, confirm the tour date and time.
-    4. Ask for their name, email, and phone number (one at a time).
-    5. Once all information is collected, confirm the tour details and ask if there's anything else they'd like to know.
+    Examples of valid tour requests:
+    - "Next Monday at 3pm"
+    - "Tomorrow at 2:00 PM"
+    - "Friday at 10am"
     
-    The user's previous messages and your conversation history will help you determine where they are in this process.
-    
-    Be conversational and human-like. Respond directly to what they just said.
+    Be conversational and human-like. Respond directly to what they just said and store response and tour information in your structured output.
+
+    {format_instructions}
     """
-    
-    # Get the conversation history
-    messages = state.messages
-    
-    # Create the prompt template
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", tour_scheduler_prompt.format(current_datetime=CURRENT_DATETIME)),
-        MessagesPlaceholder(variable_name="messages"),
+
+    # Create output parser
+    parser = StructuredOutputParser.from_response_schemas([
+        ResponseSchema(name="response", description="The full response message to the user"),
+        ResponseSchema(name="tour_scheduled", description="Whether the tour has been successfully scheduled (true/false)"),
+        ResponseSchema(name="tour_date", description="The date of the tour"),
+        ResponseSchema(name="tour_time", description="The time of the tour"),
+        ResponseSchema(name="user_info", description="Extracted user information", type="object", properties={
+            "first_name": {"type": "string", "description": "User's first name"},
+            "last_name": {"type": "string", "description": "User's last name"},
+            "email": {"type": "string", "description": "User's email address"},
+            "phone": {"type": "string", "description": "User's phone number"}
+        })
     ])
     
-    # Get response from LLM
-    response = llm.invoke(
-        prompt.invoke({"messages": messages}).to_messages()
+    last_message = state.messages[-1]
+    new_message = tour_scheduler_prompt.format(
+        user_message=last_message.content,
+        current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        format_instructions=parser.get_format_instructions()
     )
     
-    # Update state with the response
-    state.messages.append(AIMessage(content=response.content))
-    
-    # Extract information from the response to update the state
-    extraction_prompt = """
-    Based on the conversation so far, extract the following information if available:
-    
-    1. Has a tour been scheduled? (true/false)
-    2. Tour date (if scheduled)
-    3. Tour time (if scheduled)
-    4. First name
-    5. Last name
-    6. Email
-    7. Phone
-    
-    Format your response as valid JSON. If a piece of information is not available, use null.
-    
-    Example:
-    {
-        "tour_scheduled": true,
-        "tour_date": "2025-03-10",
-        "tour_time": "14:00",
-        "first_name": "John",
-        "last_name": "Smith",
-        "email": "john@example.com",
-        "phone": "555-123-4567"
-    }
-    """
-    
-    extraction_result = llm.invoke(
-        extraction_prompt + "\n\nConversation:\n" + 
-        "\n".join([f"{'User' if isinstance(msg, HumanMessage) else 'Sophie'}: {msg.content}" for msg in messages])
-    ).content
-    
-    # Parse the extraction result
-    json_match = re.search(r'{.*}', extraction_result, re.DOTALL)
-    if json_match:
-        try:
-            extracted_data = json.loads(json_match.group(0))
-            
-            # Update the state with the extracted information
-            state.inquiry.tour_scheduled = extracted_data.get("tour_scheduled", False)
-            if extracted_data.get("tour_date"):
-                state.inquiry.tour_date = extracted_data["tour_date"]
-            if extracted_data.get("tour_time"):
-                state.inquiry.tour_time = extracted_data["tour_time"]
-            if extracted_data.get("first_name"):
-                state.user_info.first_name = extracted_data["first_name"]
-            if extracted_data.get("last_name"):
-                state.user_info.last_name = extracted_data["last_name"]
-            if extracted_data.get("email"):
-                state.user_info.email = extracted_data["email"]
-            if extracted_data.get("phone"):
-                state.user_info.phone = extracted_data["phone"]
-        except json.JSONDecodeError:
-            # If JSON parsing fails, just continue without updating state
-            pass
-    
-    # Increment tour scheduling attempts
-    state.conversation_state.tour_scheduling_attempts += 1
-    
-    # Determine the next node based on the state of the tour scheduling
-    if state.inquiry.tour_scheduled and state.user_info.email and state.user_info.phone:
-        # All information collected, go to router for any other questions
-        state.next_node = "router"
-    else:
-        # Continue with the tour scheduling
+    # Get structured response with retries
+    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+
+    if parsed_response.get("failed_parsing"):
+        state.failed_parsing = True
+        state.n_parsing_fails += 1
+
+        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
+        if state.n_parsing_fails >= 3:
+            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
+            state.next_node = None
+            return state
+        
+        # If normal failure, send to tour_scheduler
+        else:
+            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
+            print(failed_parsing_message)
+            state.messages += [AIMessage(content=failed_parsing_message)]
+            state.next_node = "tour_scheduler"
+            return state
+
+    # If success, execute node's logic
+    response = parsed_response["response"]
+    tour_scheduled = parsed_response["tour_scheduled"].lower() == 'true'  # Convert string to boolean
+    tour_date = parsed_response["tour_date"]
+    tour_time = parsed_response["tour_time"]
+    user_info = parsed_response.get("user_info", {})
+
+    print(f"Sophie: {response}")
+    state.messages += [AIMessage(content=response)]
+
+    # Update user info if provided by the LLM
+    if user_info:
+        if user_info.get("first_name"):
+            state.user_info.first_name = user_info["first_name"]
+        if user_info.get("last_name"):
+            state.user_info.last_name = user_info["last_name"]
+        if user_info.get("email"):
+            state.user_info.email = user_info["email"]
+        if user_info.get("phone"):
+            state.user_info.phone = user_info["phone"]
+
+    if not tour_scheduled:
         state.next_node = "tour_scheduler"
-    
+    else:
+        # Update state with the tour information
+        state.conversation_state.tour_date = tour_date
+        state.conversation_state.tour_time = tour_time
+        state.conversation_state.tour_scheduled = True
+        state.next_node = "router"
+
     return state
 
 def knowledge_base(state: AgentState) -> AgentState:
@@ -543,6 +578,25 @@ def knowledge_base(state: AgentState) -> AgentState:
         redirect_check_prompt.format(last_ai_message=response.content)
     ).content.strip().lower()
     
+    # Check for parsing failure
+    if redirect_suggested not in ["yes", "no"]:
+        state.failed_parsing = True
+        state.n_parsing_fails += 1
+
+        # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
+        if state.n_parsing_fails >= 3:
+            print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
+            state.next_node = None
+            return state
+        
+        # If normal failure, send to router
+        else:
+            failed_parsing_message = "Sophie: I apologize, but I'm having trouble processing your request. Let me try again."
+            print(failed_parsing_message)
+            state.messages += [AIMessage(content=failed_parsing_message)]
+            state.next_node = "router"
+            return state
+    
     # Set the next node based on whether a redirect is suggested
     if redirect_suggested == "yes":
         state.next_node = "reattempt_live_contact"
@@ -551,3 +605,7 @@ def knowledge_base(state: AgentState) -> AgentState:
     
     return state
 
+def validator(state: AgentState) -> AgentState:
+    """Validates the AI's response."""
+    pass
+    

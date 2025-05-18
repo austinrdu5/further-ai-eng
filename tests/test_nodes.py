@@ -318,8 +318,7 @@ def test_tour_scheduler_max_attempts(base_state):
     result = tour_scheduler(base_state)
     
     # Verify
-    assert result.next_node == "info_collector"
-    assert result.conversation_state.wants_callback == True
+    assert result.next_node == "reattempt_live_contact"
 
 @pytest.mark.tour_scheduler
 def test_tour_scheduler_successful(base_state):
@@ -355,8 +354,9 @@ def test_tour_scheduler_date_time_handling(base_state):
     result = tour_scheduler(base_state)
     
     # Verify
-    assert result.next_node == "tour_scheduler"
+    assert result.next_node == "router"
     assert result.conversation_state.tour_scheduling_attempts == 1
+    assert result.conversation_state.tour_scheduled == True
     assert "Monday" in result.messages[-1].content
     assert "3pm" in result.messages[-1].content
 
