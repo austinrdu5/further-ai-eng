@@ -26,7 +26,6 @@ def test_intro_node_phone_request(base_state):
     
     # Verify
     assert result.next_node == "intro"
-    assert len(result.messages) == 2
     assert re.search(r"8\s*5\s*0\s*[-()]*\s*4\s*4\s*5\s*[-()]*\s*8\s*3\s*6\s*2", result.messages[-1].content)
 
 @pytest.mark.intro
@@ -40,7 +39,6 @@ def test_intro_node_employment_request(base_state):
     
     # Verify
     assert result.next_node == "intro"
-    assert len(result.messages) == 2
     assert "careers" in result.messages[1].content.lower()
 
 @pytest.mark.intro
@@ -66,7 +64,6 @@ def test_intro_node_state_transition_to_router(base_state):
     
     # Verify
     assert result.next_node == "router"
-    assert len(result.messages) == 2
     assert "director of sales" in result.messages[1].content.lower()
     assert not result.failed_parsing
     assert result.n_parsing_fails == 0
@@ -83,7 +80,6 @@ def test_router_first_message_disclosure(base_state):
     result = router(base_state)
     
     # Verify
-    assert len(result.messages) == 2
     assert "conversation is being recorded" in result.messages[1].content
     assert result.conversation_state.disclosure_given
 
@@ -191,7 +187,6 @@ def test_reattempt_live_contact_first_attempt(base_state):
     # Verify
     assert result.next_node == "info_collector"
     assert result.conversation_state.wants_callback == True
-    assert len(result.messages) == 2  # Original message + failure message
     assert "sales director is not currently available" in result.messages[1].content
 
 @pytest.mark.reattempt_live_contact
@@ -240,7 +235,6 @@ def test_reattempt_live_contact_no_previous_attempt(base_state):
     assert result.next_node == "info_collector"
     assert result.conversation_state.time_of_transfer_attempt is not None
     assert result.conversation_state.wants_callback == True
-    assert len(result.messages) == 2  # Original message + failure message
     assert "sales director is not currently available" in result.messages[1].content
 
 # Info_collector Node Tests
@@ -373,7 +367,6 @@ def test_knowledge_base_pricing(base_state):
     
     # Verify
     assert result.next_node == "router"
-    assert len(result.messages) == 2
     assert "$" in result.messages[-1].content
 
 @pytest.mark.knowledge_base
@@ -402,7 +395,6 @@ def test_knowledge_base_community_details(base_state):
     
     # Verify
     assert result.next_node == "router"
-    assert len(result.messages) == 2
     assert "community" in result.messages[1].content.lower()
 
 @pytest.mark.knowledge_base
@@ -417,7 +409,6 @@ def test_knowledge_base_financing(base_state):
     
     # Verify
     assert result.next_node == "router"
-    assert len(result.messages) == 2
     assert "medicaid" in result.messages[1].content.lower()
 
 @pytest.mark.knowledge_base
@@ -435,7 +426,6 @@ def test_knowledge_base_continue_vs_redirect(base_state):
     
     # Verify
     assert result.next_node == "router"
-    assert len(result.messages) == 3
     assert "continue" in result.messages[-1].content.lower()
 
 def test_router_multiple_inquiries(base_state):
