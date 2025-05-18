@@ -7,7 +7,7 @@ from typing import Optional, Literal, Callable, TypeVar, Any, List, Tuple
 from datetime import datetime, timedelta
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
@@ -55,6 +55,7 @@ def structured_invoke(llm: ChatOpenAI,
     for attempt in range(max_retries):
         try:
             response = llm.invoke(messages)
+            logger.info(f"Raw LLM output (attempt {attempt + 1}): {response.content}")
             return parser.parse(response.content)
         except OutputParserException as e:
             logger.error(f"OutputParserException on attempt {attempt + 1}/{max_retries}: {e}")
@@ -74,19 +75,19 @@ def intro(state: AgentState) -> AgentState:
     intro_prompt = """
     Instructions:
     1. Continue the above conversation by rephrasing the user's last query to confirm understanding(e.g. "Got it! I can definitely help with that.")
-    2. Analyze the user's question for the following cases:
-        - If asking for community phone number or about existing vendor/resident:
-            - Community's number is (850)-445-8362 and ask if they have other questions
-            - Set next_node to "intro"
-        - If asking about employment:
-            - Direct user to careers page: https://www.talkfurther.com/events-demo and ask if they have other questions
-            - Set next_node to "intro"
-        - For questions not related to the community:
-            - "I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
-            - Set next_node to "intro"
-        - For queries related to the community:
-            - "Let me check if my director of sales is available to answer your question. Please hold."
-            - Set next_node to "router"
+    2. Classify the user's intent into the following cases to respond and choose the next_node:
+        - If user asks for a phone number or identifies as a current vendor/resident:
+            - "response": Respond with the community phone number (850)-445-8362 and ask if they have other questions"
+            - "next_node": "intro"
+        - If question is related to employment or working at the community:
+            - "response": Direct user to careers page: https://www.talkfurther.com/events-demo and ask if they have other questions
+            - "next_node": "intro"
+        - For other queries related to the community, callbacks, tours, or customer service:
+            - "response": Something like "Let me check if the director of sales is available to [help with whatever the user asked]. Please hold."
+            - "next_node": "router"
+        - For messages not related to the community:
+            - "response": "I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
+            - "next_node": "intro"
     
     {format_instructions}
     """
@@ -215,13 +216,13 @@ def router(state: AgentState) -> AgentState:
         logger.info("Routing to knowledge_base for general inquiry")
         state.next_node = "knowledge_base"
 
-        # TODO: do we need to trim down to only the relevant knowledge?
-        # state.conversation_state.inquiry_types = []
-        # inquiry_types = parsed_response.get("inquiry_types", [])
-        # logger.info(f"Knowledge inquiry types: {inquiry_types}")
-        # for inquiry_type in ["community_info", "amenities", "policies", "employment", "pricing", "financing", "uncategorized", "phone"]:
-        #     if inquiry_type in inquiry_types:
-        #         state.conversation_state.inquiry_types.append(inquiry_type)
+        # Set inquiry types based on the parsed response
+        state.conversation_state.inquiry_types = []
+        inquiry_types = parsed_response.get("inquiry_types", [])
+        logger.info(f"Knowledge inquiry types: {inquiry_types}")
+        for inquiry_type in ["community_info", "amenities", "policies", "employment", "pricing", "financing", "uncategorized", "phone"]:
+            if inquiry_type in inquiry_types:
+                state.conversation_state.inquiry_types.append(inquiry_type)
 
     elif category == "off_topic":
         off_topic_message = "Sophie: I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"

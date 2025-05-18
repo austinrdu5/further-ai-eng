@@ -24,33 +24,23 @@ def pytest_configure(config):
 @pytest.fixture
 def base_state():
     """Create a base state for testing."""
-    return AgentState(
-        messages=[AIMessage(content="Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?")],
-        conversation_state=ConversationState(),
-        user_info=UserInfo(),
-    )
+    return AgentState()
 
 @pytest.fixture
 def intro_state_with_history():
     """Create a state with conversation history for intro testing."""
-    return AgentState(
-        messages=[
-            AIMessage(content="Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?"),
-            HumanMessage(content="Hello"),
-            HumanMessage(content="What are your prices?")
-        ],
-        conversation_state=ConversationState(),
-        user_info=UserInfo(),
-    )
+    state = AgentState()
+    state.messages.append([AIMessage(content="Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?"),
+                           HumanMessage(content="Hello"),
+                           HumanMessage(content="What are your prices?")
+                           ])
+    return state
 
 @pytest.fixture
 def intro_state_with_parsing_failure():
     """Create a state with parsing failure for intro testing."""
-    state = AgentState(
-        messages=[HumanMessage(content="I need help")],
-        conversation_state=ConversationState(),
-        user_info=UserInfo(),
-    )
+    state = AgentState()
+    state.messages.append(HumanMessage(content="I need help"))
     state.failed_parsing = True
     state.n_parsing_fails = 1
     return state
@@ -58,11 +48,8 @@ def intro_state_with_parsing_failure():
 @pytest.fixture
 def intro_state_with_max_failures():
     """Create a state with maximum parsing failures for intro testing."""
-    state = AgentState(
-        messages=[HumanMessage(content="I need help")],
-        conversation_state=ConversationState(),
-        user_info=UserInfo(),
-    )
+    state = AgentState()
+    state.messages.append([HumanMessage(content="I need help")])
     state.failed_parsing = True
     state.n_parsing_fails = 3
     return state 
