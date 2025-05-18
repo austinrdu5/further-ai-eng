@@ -72,23 +72,21 @@ def intro(state: AgentState) -> AgentState:
     
     # Define the system prompt for the initial greeting and routing
     intro_prompt = """
-    Last user message: {user_message}
-    
     Instructions:
-    1. Rephrase the user's last query to confirm understanding: Got it! I can definitely help with that.
+    1. Continue the above conversation by rephrasing the user's last query to confirm understanding(e.g. "Got it! I can definitely help with that.")
     2. Analyze the user's question for the following cases:
         - If asking for community phone number or about existing vendor/resident:
-            - Provide number: (850)-445-8362
-            - Ask if they have other questions
+            - Community's number is (850)-445-8362 and ask if they have other questions
             - Set next_node to "intro"
         - If asking about employment:
-            - Direct to careers page: https://www.talkfurther.com/events-demo
-            - Ask if they have other questions  
+            - Direct user to careers page: https://www.talkfurther.com/events-demo and ask if they have other questions
             - Set next_node to "intro"
-        - For all other queries:
-            - "Let me check if my director of sales is available for a conversation. Please hold."
+        - For questions not related to the community:
+            - "I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
+            - Set next_node to "intro"
+        - For queries related to the community:
+            - "Let me check if my director of sales is available to answer your question. Please hold."
             - Set next_node to "router"
-    3. Be conversational, concise, and human-like. Use everyday language and don't be robotic.
     
     {format_instructions}
     """
@@ -99,18 +97,10 @@ def intro(state: AgentState) -> AgentState:
         ResponseSchema(name="next_node", description="The next node to route to (must be either 'intro' or 'router')")
     ])
 
-    last_message = state.messages[-1]  # TODO: only parse human messages
-    if not isinstance(last_message, HumanMessage):
-        raise ValueError("Last message should be a HumanMessage")
-    
-    # Augment last message 
-    new_message = intro_prompt.format(
-        user_message=last_message.content,
-        format_instructions=parser.get_format_instructions()
-    )
+    instructions = intro_prompt.format(format_instructions=parser.get_format_instructions())
     
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=instructions)], parser)
 
     # If failed parsing, handle it
     if parsed_response.get("failed_parsing"):
@@ -152,8 +142,6 @@ def router(state: AgentState) -> AgentState:
     
     # Define the system prompt for routing
     routing_prompt = """
-    Last user message: {user_message}
-    
     Instructions:
     Using the message history and the above message, categorize the user's intent into one of these categories:
         - callback: Callback request or leaving a message
@@ -182,13 +170,12 @@ def router(state: AgentState) -> AgentState:
         raise ValueError("Last message should be a HumanMessage")
     
     # Format the prompt with the last message
-    new_message = routing_prompt.format(
-        user_message=last_message.content,
+    instructions = routing_prompt.format(
         format_instructions=parser.get_format_instructions()
     )
     
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=instructions)], parser)
         
     if parsed_response.get("failed_parsing"):
         state = handle_failed_parsing(state, logger)
@@ -319,8 +306,6 @@ def info_collector(state: AgentState) -> AgentState:
     ]
     
     info_collector_prompt = """
-    Last user message: {user_message}
-    
     Instructions:
     Your task is to collect and organize the following information from the user:
     
@@ -353,16 +338,14 @@ def info_collector(state: AgentState) -> AgentState:
         })
     ])
     
-    last_message = state.messages[-1]
-    new_message = info_collector_prompt.format(
-        user_message=last_message.content,
+    instructions = info_collector_prompt.format(
         present_info="\n".join(present_info) if present_info else "None",
         missing_info="\n".join(missing_info) if missing_info else "None",
         format_instructions=parser.get_format_instructions()
     )
 
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=instructions)], parser)
 
     # If failed parsing, handle it
     if parsed_response.get("failed_parsing"):
@@ -416,8 +399,6 @@ def tour_scheduler(state: AgentState) -> AgentState:
     logger.info(f"Tour scheduling attempt {state.conversation_state.tour_scheduling_attempts}")
     
     tour_scheduler_prompt = """
-    Last user message: {user_message}
-    
     Instructions:    
     Your task is to schedule a tour for the potential resident. The user's previous messages and your conversation history will help you determine where they are in this process. Follow these steps:
     
@@ -466,15 +447,13 @@ def tour_scheduler(state: AgentState) -> AgentState:
         })
     ])
     
-    last_message = state.messages[-1]
-    new_message = tour_scheduler_prompt.format(
-        user_message=last_message.content,
+    instructions = tour_scheduler_prompt.format(
         current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         format_instructions=parser.get_format_instructions()
     )
     
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=instructions)], parser)
 
     # If failed parsing, handle it
     if parsed_response.get("failed_parsing"):
@@ -521,8 +500,6 @@ def knowledge_base(state: AgentState) -> AgentState:
     logger.info("Starting knowledge_base node")
     
     knowledge_prompt = """
-    Last user message: {user_message}
-
     Instructions:
     Use this information to answer the user's question:
     {knowledge}
@@ -545,26 +522,14 @@ def knowledge_base(state: AgentState) -> AgentState:
     parser = StructuredOutputParser.from_response_schemas([
         ResponseSchema(name="response", description="The full response message to the user"),
     ])
-
-    # TODO: do we need to trim down to only the relevant knowledge?
-    # # Get the inquiry type from state
-    # inquiry_types = state.conversation_state.inquiry_types
-    # if len(inquiry_types) == 0:
-    #     inquiry_types = ["community_info"]
-    # 
-    # # Get relevant knowledge from the knowledge base
-    # knowledge = {}
-    # for inquiry_type in inquiry_types:
-    #     knowledge.update(KNOWLEDGE_BASE.get(inquiry_type, {}))
     
-    last_message = state.messages[-1]
-    new_message = knowledge_prompt.format(user_message=last_message.content,
-                                          knowledge=json.dumps(KNOWLEDGE_BASE, indent=2), 
-                                          format_instructions=parser.get_format_instructions()
+    instructions = knowledge_prompt.format(
+        knowledge=json.dumps(KNOWLEDGE_BASE, indent=2), 
+        format_instructions=parser.get_format_instructions()
     )
 
     # Get structured response with retries
-    parsed_response = structured_invoke(llm, state.messages[:-1] + [HumanMessage(content=new_message)], parser)
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=instructions)], parser)
 
     if parsed_response.get("failed_parsing"):
         state = handle_failed_parsing(state, logger)
