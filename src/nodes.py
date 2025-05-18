@@ -251,13 +251,15 @@ def reattempt_live_contact(state: AgentState) -> AgentState:
     TWO_MINUTES = 120
     now = datetime.now()
     time_of_last_attempt = state.conversation_state.time_of_transfer_attempt
-    time_since_last_attempt = now - time_of_last_attempt
     
-    # Early exit to info_collector if not enough time has passed
-    if time_of_last_attempt is not None and time_since_last_attempt.total_seconds() <= TWO_MINUTES:
-        logger.info("Not enough time since last transfer attempt, routing to info_collector")
-        state.next_node = "info_collector"
-        return state
+    # If there was a previous attempt, check if enough time has passed
+    if time_of_last_attempt is not None:
+        time_since_last_attempt = now - time_of_last_attempt
+        # Early exit to info_collector if not enough time has passed
+        if time_since_last_attempt.total_seconds() <= TWO_MINUTES:
+            logger.info("Not enough time since last transfer attempt, routing to info_collector")
+            state.next_node = "info_collector"
+            return state
     
     # Else, attempt to transfer to live contact
     logger.info("Attempting transfer to live contact")
