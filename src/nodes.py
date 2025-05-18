@@ -287,6 +287,23 @@ def info_collector(state: AgentState) -> AgentState:
     """Collects contact information from the user."""
     logger.info("Starting info_collector node")
     
+    info_collector_prompt = """
+    Instructions:
+    Your task is to collect the following information from the user and structure it in a JSON object:
+    
+    Information already collected:
+    {present_info}
+    
+    Information missing:
+    {missing_info}
+    
+    Using the conversation history, determine what remaining information you should ask for. 
+    Don't be too pushy; only first name, last name, and either (email or phone) are required.
+    If the user provides any additional information that's useful for a future contact, add it to the extra_information field.
+    
+    {format_instructions}
+    """
+
     user_fields = {
         'first_name': 'first name',
         'last_name': 'last name',
@@ -312,37 +329,18 @@ def info_collector(state: AgentState) -> AgentState:
         if not getattr(state.user_info, field)
     ]
     
-    info_collector_prompt = """
-    Instructions:
-    Your task is to collect and organize the following information from the user:
-    
-    Information already collected:
-    {present_info}
-    
-    Information missing:
-    {missing_info}
-    
-    Using the conversation history, determine what remaining information you should ask for. 
-    Don't be too pushy; only first name, last name, and either (email or phone) are required.
-    If the user provides any additional information that's useful for a future contact, add it to the extra_information field.
-    
-    {format_instructions}
-    """
-    
     # Create output parser
     parser = StructuredOutputParser.from_response_schemas([
-        ResponseSchema(name="response", description="The full response message to the user"),
-        ResponseSchema(name="user_info", description="Updated user information", type="object", properties={
-            "first_name": {"type": "string", "description": "User's first name"},
-            "last_name": {"type": "string", "description": "User's last name"},
-            "email": {"type": "string", "description": "User's email address"},
-            "phone": {"type": "string", "description": "User's phone number"},
-            "address": {"type": "string", "description": "User's address"},
-            "preferred_contact_time": {"type": "string", "description": "User's preferred contact time"},
-            "preferred_care_type": {"type": "string", "description": "User's preferred care type (assisted_living or independent_living)"},
-            "resident_relationship": {"type": "string", "description": "User's relationship to the resident"},
-            "extra_information": {"type": "object", "description": "Additional user preferences/requirements"}
-        })
+        ResponseSchema(name="response", description="The full response message to the user that continues the conversation"),
+        ResponseSchema(name="first_name", description="User's first name"),
+        ResponseSchema(name="last_name", description="User's last name"),
+        ResponseSchema(name="email", description="User's email address"),
+        ResponseSchema(name="phone", description="User's phone number"),
+        ResponseSchema(name="address", description="User's address"),
+        ResponseSchema(name="preferred_contact_time", description="User's preferred contact time"),
+        ResponseSchema(name="preferred_care_type", description="User's preferred care type (assisted_living or independent_living)"),
+        ResponseSchema(name="resident_relationship", description="User's relationship to the resident"),
+        ResponseSchema(name="extra_information", description="Additional user preferences/requirements")
     ])
     
     instructions = info_collector_prompt.format(
@@ -350,6 +348,10 @@ def info_collector(state: AgentState) -> AgentState:
         missing_info="\n".join(missing_info) if missing_info else "None",
         format_instructions=parser.get_format_instructions()
     )
+
+    # Log the full prompt/instructions and system prompt
+    logger.info("Injected info_collector instructions:\n%s", instructions)
+    logger.info("Conversation history: %s", state.messages)
 
     # Get structured response with retries
     parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=instructions)], parser)
@@ -361,17 +363,13 @@ def info_collector(state: AgentState) -> AgentState:
 
     # If success, execute node's logic
     response = parsed_response["response"]
-    user_info = parsed_response["user_info"]
-
-    print(f"Sophie: {response}")     
-    state.messages += [AIMessage(content=response)]
-
+    
     # Update state with user info
     for field, _ in user_fields.items():
         if field == 'extra_information':
-            state.user_info.extra_information.update(user_info.get(field, {}))
+            state.user_info.extra_information.update(parsed_response.get(field, {}))
         else:
-            setattr(state.user_info, field, user_info.get(field, getattr(state.user_info, field)))
+            setattr(state.user_info, field, parsed_response.get(field, getattr(state.user_info, field)))
     
     # Check if all required information has been collected
     all_collected = (
