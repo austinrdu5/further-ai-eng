@@ -262,94 +262,110 @@ def reattempt_live_contact(state: AgentState) -> AgentState:
 def info_collector(state: AgentState) -> AgentState:
     """Collects contact information from the user."""
     
+    user_fields = {
+        'first_name': 'first name',
+        'last_name': 'last name',
+        'email': 'email address',
+        'phone': 'phone number',
+        'address': 'address',
+        'preferred_contact_time': 'preferred contact time',
+        'preferred_care_type': 'preferred care type',
+        'resident_relationship': 'relationship to the resident',
+        'extra_information': 'any additional information'
+    }
+    
+    # Get missing and present info fields from state
+    present_info = [
+        f"{display_name}: {getattr(state.user_info, field)}"
+        for field, display_name in user_fields.items() 
+        if getattr(state.user_info, field)
+    ]
+    
+    missing_info = [
+        display_name 
+        for field, display_name in user_fields.items() 
+        if not getattr(state.user_info, field)
+    ]
+    
     info_collector_prompt = """
-    You are Sophie, a virtual sales specialist at ACME Senior Living.
+    Last user message: {user_message}
     
-    Your task is to collect contact information from the user. Ask for the following information (one at a time):
+    Instructions:
+    Your task is to collect and organize the following information from the user:
     
-    1. Their name (first and last)
-    2. Their email address
-    3. Their phone number
-    4. Their address (if needed)
+    Information already collected:
+    {present_info}
     
-    Once you have all this information, thank them and ask if there's anything else you can help with.
+    Information missing:
+    {missing_info}
     
-    Be conversational and human-like. Respond directly to what they just said.
+    Using the conversation history, determine what remaining information you should ask for. 
+    Don't be too pushy; only first name, last name, and either (email or phone) are required.
+    If the user provides any additional information that's useful for a future contact, add it to the extra_information field.
+    
+    {format_instructions}
     """
     
-    # Get the conversation history
-    messages = state.messages
-    
-    # Create the prompt template
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", info_collector_prompt),
-        MessagesPlaceholder(variable_name="messages"),
+    # Create output parser
+    parser = StructuredOutputParser.from_response_schemas([
+        ResponseSchema(name="response", description="The full response message to the user"),
+        ResponseSchema(name="user_info", description="Updated user information", type="object", properties={
+            "first_name": {"type": "string", "description": "User's first name"},
+            "last_name": {"type": "string", "description": "User's last name"},
+            "email": {"type": "string", "description": "User's email address"},
+            "phone": {"type": "string", "description": "User's phone number"},
+            "address": {"type": "string", "description": "User's address"},
+            "preferred_contact_time": {"type": "string", "description": "User's preferred contact time"},
+            "preferred_care_type": {"type": "string", "description": "User's preferred care type (assisted_living or independent_living)"},
+            "resident_relationship": {"type": "string", "description": "User's relationship to the resident"},
+            "extra_information": {"type": "object", "description": "Additional user preferences/requirements"}
+        })
     ])
     
-    # Get response from LLM
-    response = llm.invoke(
-        prompt.invoke({"messages": messages}).to_messages()
+    last_message = state.messages[-1]
+    new_message = info_collector_prompt.format(
+        user_message=last_message.content,
+        present_info="\n".join(present_info) if present_info else "None",
+        missing_info="\n".join(missing_info) if missing_info else "None",
+        format_instructions=parser.get_format_instructions()
     )
+
+    # Get structured response with retries
+    parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=new_message)], parser)
+
+    # Whether success or fail, parsed_response is a dictionary
+    response = parsed_response["response"]
+    user_info = parsed_response["user_info"]
+    failed_parsing = parsed_response.get("failed_parsing", False)
+
+    # Update state with the response and user info
+    state.messages += [AIMessage(content=response)]
+    for field, _ in user_fields.items():
+        if field == 'extra_information':
+            state.user_info.extra_information.update(user_info.get(field, {}))
+        else:
+            setattr(state.user_info, field, user_info.get(field, getattr(state.user_info, field)))
     
-    # Update state with the response
-    state.messages.append(AIMessage(content=response.content))
-    
-    # Extract contact information from the conversation
-    extraction_prompt = """
-    Based on the conversation so far, extract the following information if available:
-    
-    1. First name
-    2. Last name
-    3. Email address
-    4. Phone number
-    5. Address
-    
-    Format your response as valid JSON. If a piece of information is not available, use null.
-    
-    Example:
-    {
-        "first_name": "John",
-        "last_name": "Smith",
-        "email": "john@example.com",
-        "phone": "555-123-4567",
-        "address": "123 Main St"
-    }
-    """
-    
-    extraction_result = llm.invoke(
-        extraction_prompt + "\n\nConversation:\n" + 
-        "\n".join([f"{'User' if isinstance(msg, HumanMessage) else 'Sophie'}: {msg.content}" for msg in messages])
-    ).content
-    
-    # Parse the extraction result
-    json_match = re.search(r'{.*}', extraction_result, re.DOTALL)
-    if json_match:
-        try:
-            extracted_data = json.loads(json_match.group(0))
-            
-            # Update the state with the extracted information
-            if extracted_data.get("first_name"):
-                state.user_info.first_name = extracted_data["first_name"]
-            if extracted_data.get("last_name"):
-                state.user_info.last_name = extracted_data["last_name"]
-            if extracted_data.get("email"):
-                state.user_info.email = extracted_data["email"]
-            if extracted_data.get("phone"):
-                state.user_info.phone = extracted_data["phone"]
-            if extracted_data.get("address"):
-                state.user_info.address = extracted_data["address"]
-        except json.JSONDecodeError:
-            # If JSON parsing fails, just continue without updating state
-            pass
+    if failed_parsing:
+        state.failed_parsing = True
+        state.n_parsing_fails += 1
+
+    # If Sophie has failed to parse the user's message 3 times in a row, apologize and end the conversation
+    if state.n_parsing_fails >= 3:
+        print("Sophie: I apologize, but I'm having trouble processing your request. Please call 850-445-8362 for assistance.")
+        state.next_node = None
+        return state
+
+    # If not failed, execute node's logic
+    print(f"Sophie: {response}")       
     
     # Check if all required information has been collected
     all_collected = (
         state.user_info.first_name and 
-        state.user_info.email and 
-        state.user_info.phone
+        state.user_info.last_name and 
+        (state.user_info.email or state.user_info.phone)
     )
-    
-    # Determine the next node
+
     if all_collected:
         state.next_node = "router"
     else:
@@ -535,14 +551,3 @@ def knowledge_base(state: AgentState) -> AgentState:
     
     return state
 
-def determine_next_step(state: AgentState) -> str:
-    """Determines the next step in the conversation flow based on the state."""
-    
-    # If the state has a specific next node, use that
-    if state.next_node:
-        next_node = state.next_node
-        state.next_node = None  # Reset for next time
-        return next_node
-    
-    # Default to the router
-    return "router"
