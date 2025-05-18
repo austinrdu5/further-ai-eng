@@ -144,33 +144,36 @@ def router(state: AgentState) -> AgentState:
     # Define the system prompt for routing
     routing_prompt = """
     Instructions:
-    Using the message history and the above message, categorize the user's intent into one of these categories:
-        - callback: Callback request or leaving a message
-        - tour: Tour request
-        - floorplan: Floorplan request
-        - frustration: Frustration with AI
-        - knowledge: a general question about the community
-            - community_info: about community name, phone number, address, smoking policy, care types, room types, capacity, minimum age, entrance fee, cost, price, tour hours
-            - amenities: about activities, services, features, rooms, dining, fitness, medical services, etc.
-            - policies: about pets, cars, couples, wheelchairs, visiting hours, security, lease term, languages, payment options, etc.
-            - employment: about jobs at the community
-        - off_topic: not about the community
+    Using the message history, categorize the user's intent using the structured output:
+        - User wants to leave a message or get a callback
+            - "category": "callback"
+        - User wants to schedule a tour
+            - "category": "tour"
+        - User wants more information about the floorplans
+            - "category": "floorplan"
+        - User is frustrated with the AI assistant
+            - "category": "frustration"
+        - User is asking a question about the community name, phone number, address, amenities, policies, employment, or other community details
+            - "category": "knowledge"
+        - User is asking a question that is not about the community,
+            - "category": "off_topic"
 
     {format_instructions}
     """
 
+    # TODO: implement inquiry_types for knowledge category
+    # - "inquiry_types": one or more of: "community_info", "amenities", "policies", or "employment"
+    #     - "community_info": questions about community name, phone number, address, smoking policy, care types, room types, capacity, minimum age, entrance fee, cost, price, tour hours
+    #     - "amenities": questions about activities, services, features, rooms, dining, fitness, medical services, etc.
+    #     - "policies": questions about pets, cars, couples, wheelchairs, visiting hours, security, lease term, languages, payment options, etc.
+    #     - "employment": questions about jobs at the community
+
     # Create output parser
     parser = StructuredOutputParser.from_response_schemas([
         ResponseSchema(name="category", description="The category of the user's request (must be either callback, tour, floorplan, frustration, knowledge, or off_topic)"),
-        ResponseSchema(name="inquiry_types", description="The type(s) of inquiry for knowledge category (can be one or more of: community_info, amenities, policies, or employment)", required=False)
+        # ResponseSchema(name="inquiry_types", description="The type(s) of inquiry for knowledge category (can be one or more of: community_info, amenities, policies, or employment). Include this field as an empty array [] for non-knowledge categories.", required=False)
     ])
     
-    # Get the last message and validate it
-    last_message = state.messages[-1]
-    if not isinstance(last_message, HumanMessage):
-        raise ValueError("Last message should be a HumanMessage")
-    
-    # Format the prompt with the last message
     instructions = routing_prompt.format(
         format_instructions=parser.get_format_instructions()
     )
@@ -183,7 +186,7 @@ def router(state: AgentState) -> AgentState:
         return state
         
     # Extract the classification
-    category = parsed_response.get("category", "knowledge")
+    category = parsed_response["category"]
     logger.info(f"Router classified user intent as: {category}")
     
     # If this is the first message after intro, add disclosure
@@ -193,6 +196,7 @@ def router(state: AgentState) -> AgentState:
         print(f"Sophie: {disclosure}")
         state.messages.append(AIMessage(content=disclosure))
         state.conversation_state.disclosure_given = True
+        time.sleep(1)
     
     # Set the next node based on the category
     if category == "callback":
@@ -216,13 +220,13 @@ def router(state: AgentState) -> AgentState:
         logger.info("Routing to knowledge_base for general inquiry")
         state.next_node = "knowledge_base"
 
-        # Set inquiry types based on the parsed response
-        state.conversation_state.inquiry_types = []
-        inquiry_types = parsed_response.get("inquiry_types", [])
-        logger.info(f"Knowledge inquiry types: {inquiry_types}")
-        for inquiry_type in ["community_info", "amenities", "policies", "employment", "pricing", "financing", "uncategorized", "phone"]:
-            if inquiry_type in inquiry_types:
-                state.conversation_state.inquiry_types.append(inquiry_type)
+        # # Set inquiry types based on the parsed response
+        # state.conversation_state.inquiry_types = []
+        # inquiry_types = parsed_response.get("inquiry_types", [])
+        # logger.info(f"Knowledge inquiry types: {inquiry_types}")
+        # for inquiry_type in ["community_info", "amenities", "policies", "employment", "pricing", "financing", "uncategorized", "phone"]:
+        #     if inquiry_type in inquiry_types:
+        #         state.conversation_state.inquiry_types.append(inquiry_type)
 
     elif category == "off_topic":
         off_topic_message = "Sophie: I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
