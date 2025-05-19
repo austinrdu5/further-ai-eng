@@ -2,8 +2,18 @@
 
 A conversational AI agent designed to handle inquiries and interactions for ACME Senior Living community. The agent, named Sophie, can handle various tasks including answering questions about the community, scheduling tours, collecting user information, and managing callbacks.
 
-## Core Functionality
+## Quick Run
+1. Clone the repository
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+3. Run agent.py:
+```bash
+python src/agent.py
+```
 
+## Core Functionality
 The agent operates as a state machine with several specialized nodes:
 
 - **Intro**: Initial greeting and conversation routing
@@ -14,7 +24,6 @@ The agent operates as a state machine with several specialized nodes:
 - **Reattempt Live Contact**: Manages transfers to live representatives
 
 ## Features
-
 - Natural conversation flow with context awareness
 - Structured information collection
 - Tour scheduling with availability checking
@@ -24,7 +33,6 @@ The agent operates as a state machine with several specialized nodes:
 - Error handling and retry mechanisms
 
 ## Prerequisites
-
 - Python 3.2
 - Required packages (install via pip):
   - langchain-core
@@ -32,16 +40,7 @@ The agent operates as a state machine with several specialized nodes:
   - langgraph
   - pydantic
 
-## Installation
-
-1. Clone the repository
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
 ## Usage
-
 The agent can be run in two modes:
 
 ### Interactive Mode
@@ -70,7 +69,6 @@ The agent can handle various types of inquiries:
 - General inquiries about amenities and policies
 
 ## Architecture
-
 The system uses a state-based architecture where:
 1. Each interaction is processed through a series of specialized nodes
 2. The state maintains conversation history and user information
@@ -78,7 +76,6 @@ The system uses a state-based architecture where:
 4. Structured output parsing ensures consistent responses
 
 ## Error Handling
-
 The system includes:
 - Retry mechanisms for failed parsing
 - Graceful fallbacks to live agents
