@@ -59,24 +59,7 @@ For detailed logging and state information:
 python src/agent.py -v
 ```
 
-## Example Interactions
-The agent can handle various types of inquiries:
-- Community information requests
-- Tour scheduling
-- Information collection
-- Callback requests
-- General inquiries about amenities and policies
-
-## Architecture
-The system uses a state-based architecture where:
-1. Each interaction is processed through a series of specialized nodes
-2. The state maintains conversation history and user information
-3. The router directs conversations to appropriate handlers
-4. Structured output parsing ensures consistent responses
-
-## Error Handling
-The system includes:
-- Retry mechanisms for failed parsing
-- Graceful fallbacks to live agents
-- Structured error handling for invalid inputs
-
+## To-dos
+- Current interface is just input() and print() with messages stored in history. These can be replaced with functions that connect to messaging API.
+- In the knowledge node, the agent currently just dumps the entire (relatively small) knowledge base into the LLM. We can optimize tokens by having the router identify which parts of the knowledge base are actually necessary.
+- Implement "attempt transfer to a live agent." Right now, we're just calling a function that waits 3 seconds and returns False.
