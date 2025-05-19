@@ -4,11 +4,12 @@ A conversational AI agent designed to handle inquiries and interactions for ACME
 
 ## Quick Run
 1. Clone the repository
-2. Install dependencies:
+2. Make a .env with OPENAI_API_KEY
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
-3. Run agent.py:
+4. Run agent.py:
 ```bash
 python src/agent.py
 ```
