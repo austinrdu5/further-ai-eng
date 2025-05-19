@@ -37,6 +37,4 @@
     - upon entry, use state.conversation_state.inquiry_type (should be set to `pricing`, `community_details`, `financing`, or `uncategorized`) to query KNOWLEDGE_BASE
     - query the LLM with the user's question and injected information
         - if question is answerable with the injected facts, answer the question and ask if there's anything else needed. next node is `router`
-        - else, apologize and say that you only have information about `pricing`, `community_details`, `financing` and that anything else needs to be handled by a human. ask if user want to be redirected.
-            - Yes: next node is `reattempt_live_contact`
-            - No: next node is `router`
+        - else, apologize and say that you only have information about `pricing`, `community_details`, `financing` 
