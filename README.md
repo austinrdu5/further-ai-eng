@@ -14,7 +14,7 @@ python src/agent.py
 ```
 
 ## Prerequisites
-- Python 3.12! (not yet compatible with Python 3.13)
+- Python 3.12! (Pydantic not yet compatible with Python 3.13)
 - Required packages (install via pip):
   - langchain-core
   - langchain-openai
