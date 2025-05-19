@@ -287,21 +287,23 @@ def info_collector(state: AgentState) -> AgentState:
     """Collects contact information from the user."""
     logger.info("Starting info_collector node")
     
-    info_collector_prompt = """
-    Instructions:
-    Your task is to collect the following information from the user and structure it in a JSON object:
-    
+    info_collector_prompt = """Instructions:
+    Your task is to continue the conversation while collecting the following information from the user. Output a JSON object containing your response and the collected information.
+
     Information already collected:
     {present_info}
-    
+
     Information missing:
     {missing_info}
-    
+
     Using the conversation history, determine what remaining information you should ask for. 
-    Don't be too pushy; only first name, last name, and either (email or phone) are required.
+    Don't be too pushy; only first name, last name, and either email or phone are required. If the user wants a brochure, ask fortheir email to send the brochure.
+    Ensure the name, email, and phone number are valid. Don't record invalid information.
     If the user provides any additional information that's useful for a future contact, add it to the extra_information field.
-    
+
     {format_instructions}
+
+    If you don't have any information, you must still output a valid JSON object: {{"response": your response, "first_name": "", "last_name": "", "email": "", "phone": "", "address": "", "preferred_contact_time": "", "preferred_care_type": "", "resident_relationship": "", "extra_information": ""}}.
     """
 
     user_fields = {
@@ -350,8 +352,7 @@ def info_collector(state: AgentState) -> AgentState:
     )
 
     # Log the full prompt/instructions and system prompt
-    logger.info("Injected info_collector instructions:\n%s", instructions)
-    logger.info("Conversation history: %s", state.messages)
+    logger.info("Conversation history: %s", state.messages + [HumanMessage(content=instructions)])
 
     # Get structured response with retries
     parsed_response = structured_invoke(llm, state.messages + [HumanMessage(content=instructions)], parser)
@@ -363,8 +364,10 @@ def info_collector(state: AgentState) -> AgentState:
 
     # If success, execute node's logic
     response = parsed_response["response"]
-    
+    print(f"Sophie: {response}")
+
     # Update state with user info
+    state.messages += [AIMessage(content=response)]
     for field, _ in user_fields.items():
         if field == 'extra_information':
             state.user_info.extra_information.update(parsed_response.get(field, {}))
@@ -555,3 +558,7 @@ def validator(state: AgentState) -> AgentState:
     """Validates the AI's response."""
     pass
     
+if __name__ == "__main__":
+    state = AgentState()
+    state.messages += [HumanMessage(content="How do I get a brochure?")]
+    info_collector(state)
