@@ -83,12 +83,12 @@ def intro(state: AgentState) -> AgentState:
     Instructions:
     1. Continue the above conversation by rephrasing the user's last query to confirm understanding(e.g. "Got it! I can definitely help with that.")
     2. Classify the user's intent and format your response and next_node accordingly:
+        - If you can, assume the question is about the community, callbacks, tours, or customer service. Always try to transfer to director of sales first:
+            - "response": "Let me check if the director of sales is available to [help with whatever the user asked]. Please hold."
+            - "next_node": "router"
         - For messages not related to the community:
             - "response": "I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
             - "next_node": "intro"
-        - For other queries related to the community, callbacks, tours, or customer service, always try to transfer to director of sales first:
-            - "response": "Let me check if the director of sales is available to [help with whatever the user asked]. Please hold."
-            - "next_node": "router"
     
     {format_instructions}
     """
@@ -139,19 +139,21 @@ def router(state: AgentState) -> AgentState:
     # Define the system prompt for routing
     routing_prompt = """
     Instructions:
-    Using the message history, categorize the user's intent using the structured output:
-        - User wants to leave a message or get a callback
-            - "category": "callback"
+    Using the last user message, categorize the user's recent intent using the structured output:
+        - User is asking a question about the community name, phone number, address, amenities, policies, employment, or other community details
+            - "category": "knowledge"
         - User wants to schedule a tour
             - "category": "tour"
         - User wants more information about the floorplans
             - "category": "floorplan"
+        - User wants to leave a message or get a callback
+            - "category": "callback"
         - User is frustrated with the AI assistant
             - "category": "frustration"
-        - User is asking a question about the community name, phone number, address, amenities, policies, employment, or other community details
-            - "category": "knowledge"
         - User is asking a question that is not about the community,
             - "category": "off_topic"
+        - If no other category applies,
+            - "category": "tour"ß
 
     {format_instructions}
     """
@@ -174,7 +176,7 @@ def router(state: AgentState) -> AgentState:
     
     # If this is the first message after intro, add disclosure
     if not state.conversation_state.disclosure_given:
-        disclosure = "Before I answer, just so you know—This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
+        disclosure = "Before I continue, just so you know — This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
         print(f"Sophie: {disclosure}")
         state.messages.append(AIMessage(content=disclosure))
         state.conversation_state.disclosure_given = True
@@ -268,7 +270,7 @@ def info_collector(state: AgentState) -> AgentState:
 
     {format_instructions}
 
-    If you don't have any information, you must still output a valid JSON object: {{"response": your response, "first_name": "", "last_name": "", "email": "", "phone": "", "address": "", "preferred_contact_time": "", "preferred_care_type": "", "resident_relationship": "", "extra_information": ""}}.
+    If you don't have any information, you must still output a valid JSON object: {{"response": your response, "first_name": "", "last_name": "", "email": "", "phone": "", "preferred_contact_time": "", "preferred_care_type": "", "resident_relationship": "", "extra_information": ""}}.
     """
 
     user_fields = {
@@ -276,7 +278,6 @@ def info_collector(state: AgentState) -> AgentState:
         'last_name': 'last name',
         'email': 'email address',
         'phone': 'phone number',
-        'address': 'address',
         'preferred_contact_time': 'preferred contact time',
         'preferred_care_type': 'preferred care type',
         'resident_relationship': 'relationship to the resident',
@@ -303,7 +304,6 @@ def info_collector(state: AgentState) -> AgentState:
         ResponseSchema(name="last_name", description="User's last name"),
         ResponseSchema(name="email", description="User's email address"),
         ResponseSchema(name="phone", description="User's phone number"),
-        ResponseSchema(name="address", description="User's address"),
         ResponseSchema(name="preferred_contact_time", description="User's preferred contact time"),
         ResponseSchema(name="preferred_care_type", description="User's preferred care type (assisted_living or independent_living)"),
         ResponseSchema(name="resident_relationship", description="User's relationship to the resident"),
@@ -332,7 +332,7 @@ def info_collector(state: AgentState) -> AgentState:
     state.messages += [AIMessage(content=response)]
     for field, _ in user_fields.items():
         if field == 'extra_information':
-            state.user_info.extra_information.update(parsed_response.get(field, {}))
+            state.user_info.extra_information.append(parsed_response.get(field, ""))
         else:
             setattr(state.user_info, field, parsed_response.get(field, getattr(state.user_info, field)))
     
@@ -383,20 +383,11 @@ def tour_scheduler(state: AgentState) -> AgentState:
     - Monday to Friday
     - Between 9:00 AM and 6:00 PM
     
-    Valid time formats include:
-    - "3pm" or "3 PM" or "3:00 PM"
-    - "2pm" or "2 PM" or "2:00 PM"
-    - "10am" or "10 AM" or "10:00 AM"
-    - "5pm" or "5 PM" or "5:00 PM"
-    
-    Examples of valid tour requests:
-    - "Next Monday at 3pm"
-    - "Tomorrow at 2:00 PM"
-    - "Friday at 10am"
-    
     Be conversational and human-like. Respond directly to what they just said and store response and tour information in your structured output.
 
     {format_instructions}
+    
+    If nothing has been scheduled yet, you must still output a valid JSON object: {{"response": your response, "tour_scheduled": false, "tour_date": "", "tour_time": "", "first_name": "", "last_name": "", "email": "", "phone": ""}}
     """
 
     # Create output parser
@@ -426,7 +417,7 @@ def tour_scheduler(state: AgentState) -> AgentState:
     
     # If success, execute node's logic
     response = parsed_response["response"]
-    tour_scheduled = parsed_response["tour_scheduled"].lower() == 'true'  # Convert string to boolean
+    tour_scheduled = parsed_response["tour_scheduled"] if isinstance(parsed_response["tour_scheduled"], bool) else parsed_response["tour_scheduled"].lower() == 'true'
     tour_date = parsed_response["tour_date"]
     tour_time = parsed_response["tour_time"]
     first_name = parsed_response["first_name"]

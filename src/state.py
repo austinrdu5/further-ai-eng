@@ -32,7 +32,7 @@ class UserInfo(BaseModel):
     preferred_contact_time: Optional[str] = None
     preferred_care_type: Optional[str] = None  # "assisted_living", "independent_living"
     resident_relationship: Optional[str] = None  # "self", "parent", "spouse", etc.
-    extra_information: Dict[str, str] = Field(default_factory=dict)  # For any additional user preferences/requirements
+    extra_information: List[str] = Field(default_factory=list)  # For any additional user preferences/requirements
 
 class ConversationState(BaseModel):
     disclosure_given: bool = False

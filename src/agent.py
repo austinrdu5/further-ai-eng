@@ -73,7 +73,7 @@ if __name__ == "__main__":
             "Wow! That is really expensive. do you take Medicaid?",
             "I would like to come for a tour, does next Sunday at 3pm work?",
             "Yes, Tuesday at 2pm might work",
-            "What is included in the monthly cost? Do the rooms have individual controlled Air Conditioning? My mom runs hot and she likes to set the temperature very low"
+            "What is included in the monthly cost? Do the rooms have individual controlled Air Conditioning? My mom runs hot and she likes to set the temperature very low",
         ]
 
         for user_input in example_inputs:
