@@ -47,7 +47,6 @@ class ConversationState(BaseModel):
     tour_date: Optional[str] = None
     tour_time: Optional[str] = None
     
-
 class AgentState(BaseModel):
     """The state of our agent."""
     user_info: UserInfo = Field(default_factory=UserInfo)
@@ -55,6 +54,7 @@ class AgentState(BaseModel):
     messages: List[Union[HumanMessage, AIMessage, SystemMessage]] = Field(default_factory=lambda: [SystemMessage(content=SYSTEM_PROMPT)])
     failed_parsing: bool = False
     n_parsing_fails: int = 0
+    accepting_user_input: bool = True
     next_node: Optional[str] = 'intro'  # Used to control flow in the graph
 
 def handle_failed_parsing(state: AgentState, logger: logging.Logger) -> AgentState:
