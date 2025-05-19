@@ -2,6 +2,10 @@ from typing import Optional, Tuple
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from state import AgentState
 from nodes import (
