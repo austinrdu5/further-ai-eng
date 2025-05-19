@@ -445,8 +445,8 @@ def tour_scheduler(state: AgentState) -> AgentState:
     parser = StructuredOutputParser.from_response_schemas([
         ResponseSchema(name="response", description="The full response message to the user"),
         ResponseSchema(name="tour_scheduled", description="Whether the tour has been successfully scheduled (true/false)"),
-        ResponseSchema(name="tour_date", description="The date of the tour"),
-        ResponseSchema(name="tour_time", description="The time of the tour"),
+        ResponseSchema(name="tour_date", description="The date of the tour, in YYYY-MM-DD format"),
+        ResponseSchema(name="tour_time", description="The time of the tour, in 24-hour format (e.g., 14:00)"),
         ResponseSchema(name="user_info", description="Extracted user information", type="object", properties={
             "first_name": {"type": "string", "description": "User's first name"},
             "last_name": {"type": "string", "description": "User's last name"},

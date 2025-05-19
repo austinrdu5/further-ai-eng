@@ -308,6 +308,8 @@ def test_tour_scheduler_first_attempt(base_state):
     # Verify
     assert result.next_node == "tour_scheduler"
     assert result.conversation_state.tour_scheduling_attempts == 1
+    assert "tour" in result.messages[-1].content.lower()
+    assert "when" in result.messages[-1].content.lower()
 
 @pytest.mark.tour_scheduler
 def test_tour_scheduler_max_attempts(base_state):
@@ -328,7 +330,7 @@ def test_tour_scheduler_successful(base_state):
     # Setup
     base_state.messages += [
         HumanMessage(content="I'd like to schedule a tour"),
-        HumanMessage(content="Tomorrow at 2pm works"),
+        HumanMessage(content="June 12th at 2pm works"),
         HumanMessage(content="My name is John Smith"),
         HumanMessage(content="john@example.com"),
         HumanMessage(content="555-123-4567")
@@ -342,6 +344,9 @@ def test_tour_scheduler_successful(base_state):
     assert result.conversation_state.tour_scheduled == True
     assert result.user_info.first_name == "John"
     assert result.user_info.email == "john@example.com"
+    assert result.user_info.phone == "555-123-4567"
+    assert "6-12" in result.conversation_state.tour_date.lower()
+    assert "14:00" == result.conversation_state.tour_time
 
 @pytest.mark.tour_scheduler
 def test_tour_scheduler_date_time_handling(base_state):
@@ -359,6 +364,8 @@ def test_tour_scheduler_date_time_handling(base_state):
     assert result.next_node == "router"
     assert result.conversation_state.tour_scheduling_attempts == 1
     assert result.conversation_state.tour_scheduled == True
+    assert result.conversation_state.tour_date is not None
+    assert "15:00" == result.conversation_state.tour_time
     assert "Monday" in result.messages[-1].content
     assert "3pm" in result.messages[-1].content
 
