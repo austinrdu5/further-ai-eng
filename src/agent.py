@@ -64,7 +64,7 @@ if __name__ == "__main__":
     conversation_state = AgentState()  # comes with the system prompt and next_node set to intro
     
     # Print greeting
-    print("Sophie: Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?")
+    print("Sophie: Hi, this is ACME Senior Living. My name is Sophie. How may I help you today?\n")
     
     if args.example:
         example_inputs = [
@@ -74,10 +74,15 @@ if __name__ == "__main__":
             "I would like to come for a tour, does next Sunday at 3pm work?",
             "Yes, Tuesday at 2pm might work",
             "What is included in the monthly cost? Do the rooms have individual controlled Air Conditioning? My mom runs hot and she likes to set the temperature very low",
+            "How much for a 2 bedroom in assisted living?",
+            "Can my mom and dad live together in the community? Mom has Dementia, but dad wants to stay with her",
+            "Can my dad bring his car?",
+            "Are dogs allowed? My mom has a golden retriever she would like to bring with her",
+            "Can I get Kosher and low sodium meals"
         ]
 
         for user_input in example_inputs:
-            print(f"User: {user_input}")
+            print(f"User: {user_input}\n")
             run_agent(conversation_state, user_input, verbose=args.verbose)
 
     else:
@@ -85,11 +90,12 @@ if __name__ == "__main__":
         while True:
             try:
                 user_input = input("User: ")
+                print('')
                 if not user_input.strip():
                     continue
 
                 if user_input.lower().strip() in ["exit", "quit", "bye"]:
-                    print("\nGoodbye!")
+                    print("Goodbye!\n")
                     break
 
                 run_agent(conversation_state, user_input, verbose=args.verbose)

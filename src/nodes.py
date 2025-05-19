@@ -41,7 +41,7 @@ llm = ChatOpenAI(temperature=0.1, model="gpt-4-turbo")  # Lower temperature for 
 
 def attempt_transfer():
     # TODO: implement function 
-    print("[10 second pause, attempt transfer to live contact...]")
+    print("[10 second pause, attempt transfer to live contact...]\n")
     time.sleep(3)
     return False
 
@@ -83,7 +83,7 @@ def intro(state: AgentState) -> AgentState:
     Instructions:
     1. Continue the above conversation by rephrasing the user's last query to confirm understanding(e.g. "Got it! I can definitely help with that.")
     2. Classify the user's intent and format your response and next_node accordingly:
-        - If you can, assume the question is about the community, callbacks, tours, or customer service. Always try to transfer to director of sales first:
+        - Assume the question is about the community, callbacks, tours, or customer service. Always try to transfer to director of sales first:
             - "response": "Let me check if the director of sales is available to [help with whatever the user asked]. Please hold."
             - "next_node": "router"
         - For messages not related to the community:
@@ -113,7 +113,7 @@ def intro(state: AgentState) -> AgentState:
     response = parsed_response["response"]
     next_node = parsed_response.get("next_node")
 
-    print(f"Sophie: {response}")   
+    print(f"Sophie: {response}\n")   
 
     state.messages.append(AIMessage(content=response))
     state.next_node = next_node
@@ -128,7 +128,7 @@ def intro(state: AgentState) -> AgentState:
             return state
         else:
             transfer_failure_message = "Our sales director is not currently available, but I am a virtual assistant, and I am able to answer basic questions about our community. Would you like to speak with me, or leave a message for Jami?"
-            print(f"Sophie: {transfer_failure_message}")
+            print(f"Sophie: {transfer_failure_message}\n")
             state.messages += [AIMessage(content=transfer_failure_message)]
 
     state.accepting_user_input = True
@@ -140,20 +140,20 @@ def router(state: AgentState) -> AgentState:
     routing_prompt = """
     Instructions:
     Using the last user message, categorize the user's recent intent using the structured output:
-        - User is asking a question about the community name, phone number, address, amenities, policies, employment, or other community details
+        - User is asking a general question about the community (keywords: name, phone number, address, price, cost, amenities, policies, employment, etc.)
             - "category": "knowledge"
-        - User wants to schedule a tour
+        - User wants to schedule a tour (keywords: tour, visit, schedule, availability, etc.)
             - "category": "tour"
-        - User wants more information about the floorplans
+        - User asks about floorplans (keywords: floorplan, sqft, bedrooms, bathrooms, etc.)
             - "category": "floorplan"
-        - User wants to leave a message or get a callback
+        - User wants to leave a message or get a callback (keywords: callback, message, call, leave a message, etc.)
             - "category": "callback"
         - User is frustrated with the AI assistant
             - "category": "frustration"
         - User is asking a question that is not about the community,
             - "category": "off_topic"
         - If no other category applies,
-            - "category": "tour"ß
+            - "category": "tour"
 
     {format_instructions}
     """
@@ -177,7 +177,7 @@ def router(state: AgentState) -> AgentState:
     # If this is the first message after intro, add disclosure
     if not state.conversation_state.disclosure_given:
         disclosure = "Before I continue, just so you know — This conversation is being recorded for quality purposes and you can leave a voicemail at anytime by pressing 0."
-        print(f"Sophie: {disclosure}")
+        print(f"Sophie: {disclosure}\n")
         state.messages.append(AIMessage(content=disclosure))
         state.conversation_state.disclosure_given = True
         time.sleep(1)
@@ -186,8 +186,8 @@ def router(state: AgentState) -> AgentState:
     category = parsed_response["category"]
 
     if category == "off_topic":
-        off_topic_message = "Sophie: I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
-        print(off_topic_message)
+        off_topic_message = "I'm sorry, I can only help with information about our community. If you have any questions, I'd be happy to answer them!"
+        print(f"Sophie: {off_topic_message}\n")
         state.messages += [AIMessage(content=off_topic_message)]
         state.accepting_user_input = True
         state.next_node = "router"
@@ -244,7 +244,7 @@ def reattempt_live_contact(state: AgentState) -> AgentState:
     
     # If transfer fails, proceed to info_collector
     transfer_failure_message = "Our sales director is not currently available, but I can take a message and have them call you back."
-    print(f"Sophie: {transfer_failure_message}")
+    print(f"Sophie: {transfer_failure_message}\n")
 
     state.next_node = "info_collector"
     state.messages += [AIMessage(content=transfer_failure_message)]
@@ -326,7 +326,7 @@ def info_collector(state: AgentState) -> AgentState:
 
     # If success, execute node's logic
     response = parsed_response["response"]
-    print(f"Sophie: {response}")
+    print(f"Sophie: {response}\n")
 
     # Update state with user info
     state.messages += [AIMessage(content=response)]
@@ -357,7 +357,7 @@ def tour_scheduler(state: AgentState) -> AgentState:
     """Handles tour scheduling requests."""
     # Early exit if we've exceeded the maximum attempts
     if state.conversation_state.tour_scheduling_attempts >= 3:
-        print("Sophie: I apologize, but I'm having trouble scheduling your tour. Let me see if I can transfer you to a live representative.")
+        print("Sophie: I apologize, but I'm having trouble scheduling your tour. Let me see if I can transfer you to a live representative.\n")
         state.next_node = "reattempt_live_contact"
         return state
     
@@ -425,7 +425,7 @@ def tour_scheduler(state: AgentState) -> AgentState:
     email = parsed_response["email"]
     phone = parsed_response["phone"]
 
-    print(f"Sophie: {response}")
+    print(f"Sophie: {response}\n")
     state.messages += [AIMessage(content=response)]
 
     # Update user info if provided by the LLM
@@ -460,13 +460,13 @@ def knowledge_base(state: AgentState) -> AgentState:
     If you can answer their question with this information:
     1. Provide a clear, direct answer
     2. Include relevant details from the knowledge base
-    3. End with "Is there anything else you would like to know?"
+    3. Ask if user has any other questions
     
     If you cannot answer their question with this information:
     1. Apologize and explain that you only have information about community details, amenities, and community policies
     2. Ask if they would like to be redirected to a human
         
-    Be conversational and human-like. Respond directly to what they just asked.
+    Be conversational and human-like. Don't be repetitive.Respond directly to what they just asked.
 
     {format_instructions}
     """
@@ -491,7 +491,7 @@ def knowledge_base(state: AgentState) -> AgentState:
     # If success, execute node's logic
     response = parsed_response["response"]
     
-    print(f"Sophie: {response}")
+    print(f"Sophie: {response}\n")
     state.messages += [AIMessage(content=response)]
 
     state.next_node = "router"
