@@ -13,6 +13,14 @@ pip install -r requirements.txt
 python src/agent.py
 ```
 
+## Prerequisites
+- Python 3.12! (not yet compatible with Python 3.13)
+- Required packages (install via pip):
+  - langchain-core
+  - langchain-openai
+  - langgraph
+  - pydantic
+
 ## Core Functionality
 The agent operates as a state machine with several specialized nodes:
 
@@ -31,14 +39,6 @@ The agent operates as a state machine with several specialized nodes:
 - Live agent transfer capabilities
 - Conversation recording disclosure
 - Error handling and retry mechanisms
-
-## Prerequisites
-- Python 3.2
-- Required packages (install via pip):
-  - langchain-core
-  - langchain-openai
-  - langgraph
-  - pydantic
 
 ## Usage
 The agent can be run in two modes:
@@ -60,7 +60,6 @@ python src/agent.py -v
 ```
 
 ## Example Interactions
-
 The agent can handle various types of inquiries:
 - Community information requests
 - Tour scheduling
